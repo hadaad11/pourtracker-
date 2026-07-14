@@ -1131,6 +1131,7 @@ function renderAllPours(){
   for(const g of list){
     const bc=barClass(g.status); const pct=g.pct!=null?Math.min(100,g.pct):0;
     rows+=`<tr>
+      <td style="text-align:center"><input type="checkbox" class="done-chk" data-e="${encodeURIComponent(doneKey(g))}" ${DONE[doneKey(g)]?'checked':''} title="Mark this pour completed"></td>
       <td class="num muted" style="white-space:nowrap">${dateCell(g)}</td>
       <td class="pour-name">${g.plant||'<span class="muted">—</span>'}</td>
       <td>${g.elem?g.elem:'<span class="muted">—</span>'}${(g.mix||g.client)?`<div class="pour-sub">${[g.mix,g.client].filter(Boolean).join(' · ')}</div>`:''}</td>
@@ -1146,13 +1147,12 @@ function renderAllPours(){
         <div class="pct">${g.pct!=null?fmt(g.pct,0)+'%':''}</div>
       </td>
       <td><span class="st ${g.status}"><span class="d"></span>${stLabel[g.status]}</span></td>
-      <td style="text-align:center"><input type="checkbox" class="done-chk" data-e="${encodeURIComponent(doneKey(g))}" ${DONE[doneKey(g)]?'checked':''} title="Mark this pour completed"></td>
     </tr>`;
   }
   el('tableArea').innerHTML=banner+`<div class="tbl-wrap"><table>
     <thead><tr>
-      <th>Date</th><th>Station</th><th>Element</th><th>Delivered (m³)</th><th>Required (m³)</th><th>Remaining (m³)</th>
-      <th>Actual rate (m³/h)</th><th>Rate (target/manual) ✎</th><th>Trucks</th><th>Finish</th><th>Progress</th><th>Status</th><th>Done</th>
+      <th>Done</th><th>Date</th><th>Station</th><th>Element</th><th>Delivered (m³)</th><th>Required (m³)</th><th>Remaining (m³)</th>
+      <th>Actual rate (m³/h)</th><th>Rate (target/manual) ✎</th><th>Trucks</th><th>Finish</th><th>Progress</th><th>Status</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 
   const cf=el('clrFilter'); if(cf)cf.addEventListener('click',async()=>{statusFilter=null;await saveCfg();renderAllPours();});
