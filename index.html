@@ -382,6 +382,10 @@
         <label>Refresh every (s)</label>
         <input id="interval" dir="ltr" type="number" min="5" value="10">
       </div>
+      <div class="field grow" style="min-width:260px">
+        <label>Sync URL (shares Done / Required / Rate with every device)</label>
+        <input id="syncUrl" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec" value="https://script.google.com/macros/s/AKfycbwUZl8iPyHWxo7cs6lAJDCIK4l0QECVYBfKtlY5bkvbKG_07wRUJOdSWs7jz496PYAXmg/exec">
+      </div>
       <button class="btn" id="loadBtn">Load / Refresh</button>
     </div>
     <div class="cfg-row" style="margin-top:10px">
@@ -1157,6 +1161,7 @@ function renderAllPours(){
       const k=decodeURIComponent(inp.dataset.k); const v=num(inp.value);
       if(v>0)REQ[k]=v; else delete REQ[k];
       await stSet(KEY_REQ,REQ); rerender();
+      syncPush('req',k, v>0?v:'');      // share with every device
     });
   });
   el('tableArea').querySelectorAll('.rate-in').forEach(inp=>{
@@ -1164,13 +1169,15 @@ function renderAllPours(){
       const k=decodeURIComponent(inp.dataset.k); const v=num(inp.value);
       if(v>0)RATE[k]=v; else delete RATE[k];
       await stSet(KEY_RATE,RATE); rerender();
+      syncPush('rate',k, v>0?v:'');     // share with every device
     });
   });
   el('tableArea').querySelectorAll('.done-chk').forEach(chk=>{
     chk.addEventListener('change',async()=>{
-      const k=decodeURIComponent(chk.dataset.e);
-      if(chk.checked)DONE[k]=true; else delete DONE[k];
+      const k=decodeURIComponent(chk.dataset.e); const on=chk.checked;
+      if(on)DONE[k]=true; else delete DONE[k];
       await stSet(KEY_DONE,DONE); rerender();
+      syncPush('done',k, on?1:'');      // closing a pour hides it on EVERY device
     });
   });
 }
@@ -1281,6 +1288,47 @@ function fetchTab(id, token){
   });
 }
 
+/* ---------- shared state sync (Google Apps Script, JSONP -> no CORS) ----------
+   Makes the SHEET the single source of truth for DONE / REQ / RATE, so a pour closed on ONE
+   device disappears on EVERY device. An empty Sync URL keeps the old purely-local behaviour. */
+function syncBase(){ const e=el('syncUrl'); return (((CFG&&CFG.syncUrl)||(e&&e.value.trim())||'')+'').trim(); }
+
+function syncCall(params){
+  const base=syncBase();
+  if(!base) return Promise.resolve(null);
+  return new Promise((resolve)=>{
+    const cb='__sy'+(++cbN);
+    const q=Object.keys(params).map(k=>`${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');
+    const url=`${base}${base.indexOf('?')<0?'?':'&'}${q}&callback=${cb}&_=${Date.now()}`;
+    let done=false;
+    const s=document.createElement('script'); s.src=url;
+    const cleanup=()=>{ try{delete window[cb];}catch(e){window[cb]=undefined;} s.remove(); };
+    const to=setTimeout(()=>{ if(done)return; done=true; cleanup(); resolve(null); },15000);
+    window[cb]=(resp)=>{ if(done)return; done=true; clearTimeout(to); cleanup(); resolve(resp&&resp.ok?resp:null); };
+    s.onerror=()=>{ if(done)return; done=true; clearTimeout(to); cleanup(); resolve(null); };
+    document.body.appendChild(s);
+  });
+}
+function applyState(st){
+  if(!st) return false;
+  DONE=st.done||{}; REQ=st.req||{}; RATE=st.rate||{};
+  stSet(KEY_DONE,DONE); stSet(KEY_REQ,REQ); stSet(KEY_RATE,RATE);   // keep a local cache for offline
+  return true;
+}
+// Pull shared state. Only overwrites the local maps when the call SUCCEEDS (offline -> keep local).
+async function syncPull(){ const r=await syncCall({action:'get'}); return r ? applyState(r.state) : false; }
+// Push one change. The script returns the authoritative state, so re-render with it.
+async function syncPush(type,key,value){
+  const r=await syncCall({action:'set', type, key, value:(value==null?'':value)});
+  if(r&&r.state && applyState(r.state)) rerender();
+  return r;
+}
+async function syncClear(type){
+  const r=await syncCall({action:'clear', type});
+  if(r&&r.state && applyState(r.state)) rerender();
+  return r;
+}
+
 function normalizeTab(cols, matrix, plantName){
   let header=null,dataRows=null;
   if(cols && looksHeader(cols)){ header=cols; dataRows=matrix; }
@@ -1311,7 +1359,8 @@ async function loadLive(){
   const planSid=(el('planSheetId')&&el('planSheetId').value.trim())||id;   // plan lives in its own sheet (first tab)
   const [results, planRes]=await Promise.all([
     Promise.all(tabs.map(t=>fetchTab(id,t))),
-    fetchTab(planSid, '')
+    fetchTab(planSid, ''),
+    syncPull()          // shared Done/Required/Rate from the sheet (no-op when Sync URL is empty)
   ]);
   if(planRes && planRes.ok){
     const parsed=parsePlanTab(planRes.cols, planRes.matrix) || parsePlanPositional(planRes.cols, planRes.matrix);
@@ -1395,6 +1444,7 @@ function reschedule(){
 /* ---------- config persistence ---------- */
 async function saveCfg(){
   CFG={sheetId:el('sheetId').value.trim(),tabs:el('tabs').value.trim(),planSheetId:el('planSheetId').value.trim(),groupBy:el('groupBy').value,
+    syncUrl:(el('syncUrl')?el('syncUrl').value.trim():''),
     fromDate:el('fromDate').value,toDate:el('toDate').value,interval:num(el('interval').value),activeTab,view};
   await stSet(KEY_CFG,CFG);
   el('openSheet').href=`https://docs.google.com/spreadsheets/d/${CFG.sheetId}/edit`;
@@ -1420,6 +1470,7 @@ function setRange(r){
     if(savedCfg.sheetId)el('sheetId').value=savedCfg.sheetId;
     if(savedCfg.tabs)el('tabs').value=savedCfg.tabs;
     if(savedCfg.planSheetId)el('planSheetId').value=savedCfg.planSheetId;
+    if(savedCfg.syncUrl&&el('syncUrl'))el('syncUrl').value=savedCfg.syncUrl;
     if(savedCfg.interval)el('interval').value=savedCfg.interval;
     if(num(el('interval').value)>30)el('interval').value=10;   // force new 10s default over the old 60s
     if(savedCfg.groupBy)el('groupBy').value=savedCfg.groupBy;
@@ -1439,7 +1490,7 @@ function setRange(r){
 
   el('cfgToggle').addEventListener('click',()=>{ el('cfgPanel').classList.toggle('show'); });
   el('refreshBtn').addEventListener('click',()=>{ loadLive(); reschedule(); });   // force an immediate re-read
-  el('resetDone').addEventListener('click',async()=>{ if(confirm('Un-mark all done pours?')){ DONE={}; await stSet(KEY_DONE,DONE); rerender(); } });
+  el('resetDone').addEventListener('click',async()=>{ if(confirm('Un-mark all done pours?')){ DONE={}; await stSet(KEY_DONE,DONE); rerender(); syncClear('done'); } });
   { const rb=el('reportBtn'); if(rb) rb.addEventListener('click',()=>{ if(buildReport()) window.print(); }); }
   el('loadBtn').addEventListener('click',async()=>{ await saveCfg(); loadLive(); reschedule(); el('cfgPanel').classList.remove('show'); });
   el('groupBy').addEventListener('change',async()=>{ await saveCfg(); rerender(); });
