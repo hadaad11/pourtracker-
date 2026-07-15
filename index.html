@@ -195,7 +195,7 @@
   .spot-sel:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,131,255,.25);outline:none}
   .spot-head .when{color:var(--muted);font-size:12.5px;font-family:var(--mono)}
   .spot-meta{margin-top:10px;font-size:12.5px;color:var(--muted);font-weight:500}
-  .spot-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-top:16px}
+  .spot-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:14px;margin-top:16px}
   .spot-cell .s-lab{font-size:11px;color:var(--muted);font-weight:700}
   .spot-cell .s-val{font-family:var(--mono);font-weight:700;font-size:22px;margin-top:4px}
   .spot-cell .s-val small{font-size:11px;color:var(--faint);font-family:var(--sans)}
@@ -469,7 +469,7 @@ const KEY_RATE='pourdash:rate';
 const KEY_DONE='pourdash:done';
 const KEY_CFG='pourdash:cfg';
 const KEY_PLAN='pourdash:plan';   // last-good plan cached so it never blanks out
-let REQ={}; let RATE={}; let DONE={}; let CFG={}; let activeTab='ALL'; let view='summary'; let spotKey=null;
+let REQ={}; let RATE={}; let DONE={}; let CFG={}; let REJECTED={}; let activeTab='ALL'; let view='summary'; let spotKey=null;
 let statusFilter=null;   // for clickable KPI tiles -> filter All Pours table
 let spotTab='overview';  // Active-now spotlight sub-tab: 'overview' | 'hourly'
 let lastPlanRange=null;   // when the plan sheet's date range changes, sync the program's date filter to it
@@ -577,6 +577,8 @@ function planKey(elem){
 }
 function planLookup(elem){ const k=planKey(elem); return k?PLAN[k]:null; }
 function elemKey(elem){ return (planKey(elem)||(String(elem||'').trim()||NOEL)).toString(); }
+// key used to tally rejected volume per element (same normalisation as the pour grouping)
+function rejKey(elem){ return (planKey(elem)||String(elem||'').trim().toUpperCase()); }
 // DONE is keyed per POUR INSTANCE = element label + that pour's date (not the bare code),
 // so marking one day's pour completed never hides a NEW plan entry that re-uses the same code.
 function doneKey(g){ return (g&&g.elem?String(g.elem):'') + '@@' + (g&&g.dk?String(g.dk):''); }
@@ -686,10 +688,11 @@ function enrichGroup(g, now){
   g.eta=null;g.finishAt=null;
   if(g.remaining!=null&&g.remaining>0&&g.rate&&g.rate>0){g.eta=g.remaining/g.rate;g.finishAt=now+g.eta*3600000;}
   if(g.required==null) g.status = recent ? 'none' : 'closed';
-  else if(g.remaining<=0) g.status = g.delivered>g.required*1.02 ? 'over':'done';
-  else if(recent) g.status='active';
-  else g.status='closed';   // auto-closed: 2h passed with no new truck (reopens if a truck loads)
-  if(DONE[doneKey(g)]) g.status='done';
+  else if(recent) g.status='active';        // still pouring — STAYS active even past target (extra counts on the same request)
+  else if(g.remaining<=0) g.status='over';  // reached/passed target but idle — an "over" badge, NEVER auto-closed
+  else g.status='closed';                   // idle >2h, still under target
+  if(DONE[doneKey(g)]) g.status='done';      // only the user's Done mark closes a pour
+  g.rejected = REJECTED[rejKey(g.elem)] || 0;   // m³ rejected (Waste / Rejected & Transferred) for this element
   return g;
 }
 
@@ -1054,6 +1057,7 @@ function renderSummary(){
         <div class="spot-grid">
           <div class="spot-cell hi"><div class="s-lab">Delivered</div><div class="s-val">${fmt(sp.delivered)} <small>m³</small></div></div>
           <div class="spot-cell hi"><div class="s-lab">Remaining</div><div class="s-val" style="color:${sp.remaining!=null&&sp.remaining>0?'var(--rose)':'var(--green)'}">${sp.remaining!=null?(sp.remaining>0?fmt(sp.remaining)+' <small>m³</small>':'✓ <small>done</small>'):'—'}</div></div>
+          <div class="spot-cell"><div class="s-lab">Rejected</div><div class="s-val" style="color:${sp.rejected>0?'var(--amber)':'var(--faint)'}">${sp.rejected>0?fmt(sp.rejected)+' <small>m³</small>':'—'}</div></div>
           <div class="spot-cell"><div class="s-lab">Required</div><div class="s-val">${sp.required!=null?fmt(sp.required):'—'} <small>m³</small></div></div>
           <div class="spot-cell"><div class="s-lab">Actual rate</div><div class="s-val">${sp.rateCalc!=null?fmt(sp.rateCalc):'—'} <small>m³/h</small></div></div>
           <div class="spot-cell"><div class="s-lab">Target rate</div><div class="s-val">${sp.planRate!=null?fmt(sp.planRate):(sp.rateManual!=null?fmt(sp.rateManual):'—')} <small>m³/h</small></div></div>
@@ -1092,9 +1096,17 @@ function renderSummary(){
       <div class="apy-num"><b>${fmt(g.delivered,0)}</b> / ${g.required!=null?fmt(g.required,0):'—'} m³</div>
       <div class="apy-rate">${g.rateCalc!=null?fmt(g.rateCalc)+' m³/h':'—'}</div>
       <div class="apy-eta">${g.finishAt?timeShort(g.finishAt):(g.status==='done'?'✓':'—')}</div>
-      <div><span class="st ${g.status}"><span class="d"></span>${stLabel[g.status]}</span></div>
+      <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end"><span class="st ${g.status}"><span class="d"></span>${stLabel[g.status]}</span><input type="checkbox" class="done-chk" data-e="${encodeURIComponent(doneKey(g))}" ${DONE[doneKey(g)]?'checked':''} title="Close this pour — same as the Done box in All Pours"></div>
     </div>`;
   }).join('') : '<div class="muted" style="font-size:13px;padding:8px 4px">No active pours right now.</div>';
+  el('activeList').querySelectorAll('.done-chk').forEach(chk=>{
+    chk.addEventListener('change',async()=>{
+      const k=decodeURIComponent(chk.dataset.e); const on=chk.checked;
+      if(on)DONE[k]=true; else delete DONE[k];      // same key as All Pours -> either one closes the pour
+      await stSet(KEY_DONE,DONE); rerender();
+      syncPush('done',k, on?1:'');
+    });
+  });
 }
 
 /* ---------- all pours view ---------- */
@@ -1336,18 +1348,27 @@ function normalizeTab(cols, matrix, plantName){
   if(!header) return {rows:[],n:0,ok:false,diag:'no header row with Date+QM3'};
   const c={ date:findCol(header,['date','تاريخ']), elem:findCol(header,['element','عنصر','بند','kks']),
     q:findCol(header,['qm3','concrete','m3','كمي','quantity','qty','volume']), dep:findCol(header,['departure','خروج','load']),
-    end:findCol(header,['end','finish','انتهاء']), truck:findCol(header,['truck','mixer','تراك','عربية']) };
+    end:findCol(header,['end','finish','انتهاء']), truck:findCol(header,['truck','mixer','تراك','عربية']),
+    follow:findCol(header,['follow up','follow','متابعة']), action:findCol(header,['action','إجراء']) };
   if(c.date<0||c.q<0) return {rows:[],n:0,ok:false,diag:'cols: ['+header.slice(0,12).join(' | ')+']'};
-  const out=[]; let nQ=0,nT=0;
+  // Trucks flagged Waste or Rejected & Transferred were loaded but NOT poured — drop them so they don't
+  // inflate the request total (status lives in the tab's "Follow Up"/"Action" column, next to the element).
+  const EXCL=/waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
+  const out=[]; let nQ=0,nT=0,nExcl=0;
   for(const row of dataRows){
     if(!row||row.length===0)continue;
+    const fu=c.follow>=0?String(row[c.follow]||''):''; const ac=c.action>=0?String(row[c.action]||''):'';
+    if(EXCL.test(fu)||EXCL.test(ac)){ nExcl++;
+      const relem=c.elem>=0?String(row[c.elem]||''):''; const rq=num(row[c.q]); const rk=rejKey(relem);
+      if(rk&&rq>0) REJECTED[rk]=(REJECTED[rk]||0)+rq;   // tally rejected m³ per element (shown in the spotlight)
+      continue; }
     const q=num(row[c.q]); if(q>0)nQ++;
     const dep=c.dep>=0?(row[c.dep]||''):''; const end=c.end>=0?(row[c.end]||''):'';
     if((dep&&parseTime(dep)!=null)||(end&&parseTime(end)!=null))nT++;
     out.push([ row[c.date]||'', plantName, c.elem>=0?(row[c.elem]||''):'', row[c.q]||'', dep, end, c.truck>=0?(row[c.truck]||''):'' ]);
   }
-  const cn=`date#${c.date} elem#${c.elem} q#${c.q} dep#${c.dep} end#${c.end}`;
-  return {rows:out,n:out.length,ok:true,diag:`rows=${out.length} qty>0=${nQ} time=${nT} · ${cn}`};
+  const cn=`date#${c.date} elem#${c.elem} q#${c.q} dep#${c.dep} end#${c.end} follow#${c.follow}`;
+  return {rows:out,n:out.length,ok:true,diag:`rows=${out.length} qty>0=${nQ} time=${nT}${nExcl?` · excluded ${nExcl} waste/rejected`:''} · ${cn}`};
 }
 
 async function loadLive(){
@@ -1376,6 +1397,7 @@ async function loadLive(){
         document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.remove('active')); } }
   } else { try{console.log('Plan sheet not reachable — is it shared "Anyone with the link"?');}catch(e){} }
   let allRows=[]; const report=[]; let anyOk=false;
+  REJECTED={};   // recomputed fresh each pull from every station tab's Follow Up column
   for(const r of results){
     if(r.ok){ const nz=normalizeTab(r.cols,r.matrix,r.token);
       report.push(`<b>${r.token}</b>: ${nz.ok?nz.diag:('✗ '+(nz.diag||'no columns'))}`);
