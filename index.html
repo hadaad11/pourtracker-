@@ -999,6 +999,17 @@ function renderSummary(){
   const rates=open.map(g=>g.rateCalc).filter(x=>x!=null&&x>0);
   const avgRate=rates.length?rates.reduce((a,b)=>a+b,0)/rates.length:null;
   const behind=open.filter(g=>g.rateCalc!=null&&g.planRate!=null&&g.rateCalc<g.planRate*0.9).length;
+  // Production totals from the RAW station data (LAST.matrix = every date, pre date-filter, waste already dropped):
+  //   MTD  = poured since the 1st of the current month · Today = poured since 00:00 today.
+  const prod=(function(){ const n=new Date();
+    const monthStart=new Date(n.getFullYear(),n.getMonth(),1).getTime();
+    const todayStart=new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime();
+    let mtd=0,today=0;
+    for(const row of (LAST.matrix||[])){ const d=parseDate(row[0]); if(!d)continue;
+      const t=new Date(d.y,d.mo-1,d.d).getTime(); const q=num(row[3]);
+      if(t>=monthStart) mtd+=q; if(t>=todayStart) today+=q; }
+    return {mtd,today};
+  })();
 
   // KPIs — Active / Completed / Upcoming are clickable to jump to a filtered list
   const cnum=(n,dec)=>`<span class="cnum" data-num="${n}" data-dec="${dec}">${fmt(n,dec)}</span>`;
@@ -1022,8 +1033,8 @@ function renderSummary(){
   el('overview').innerHTML=`<div class="ov">
     ${ringSvg(overallPct)}
     <div class="ov-stats">
-      <div class="ov-s"><span class="l">Trucks (total)</span><span class="v">${fmt(trucks,0)}</span></div>
-      <div class="ov-s"><span class="l">Avg actual rate</span><span class="v">${avgRate!=null?fmt(avgRate):'—'}<small>m³/h</small></span></div>
+      <div class="ov-s"><span class="l">Production MTD</span><span class="v">${fmt(prod.mtd,0)}<small>m³</small></span></div>
+      <div class="ov-s"><span class="l">Production today</span><span class="v">${fmt(prod.today,0)}<small>m³</small></span></div>
       <div class="ov-s"><span class="l">Behind schedule</span><span class="v" style="color:${behind?'var(--rose)':'var(--green)'}">${behind}</span></div>
       <div class="ov-s"><span class="l">Completed volume</span><span class="v">${fmt(completed.reduce((s,g)=>s+g.delivered,0),0)}<small>m³</small></span></div>
     </div>
