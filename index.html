@@ -1177,7 +1177,7 @@ function renderAllPours(){
       const k=decodeURIComponent(chk.dataset.e); const on=chk.checked;
       if(on)DONE[k]=true; else delete DONE[k];
       await stSet(KEY_DONE,DONE); rerender();
-      syncPush('done',k, on?1:'');      // closing a pour hides it on EVERY device
+      syncPush('done',k, on?1:'');       // closing a pour hides it on EVERY device
     });
   });
 }
