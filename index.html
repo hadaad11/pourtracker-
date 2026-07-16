@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
+<!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
+<meta name="app-build" content="20260716-130730">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1489,6 +1491,25 @@ function parseCSV(text){
   return rows;
 }
 
+/* ---------- self-update ----------
+   GitHub Pages can't send no-cache headers, so a device may open a STALE copy of index.html.
+   Fix: read our own build stamp, fetch the live copy cache-busted, and if the stamp moved on,
+   reload once from a fresh URL. No hard-refresh needed by anyone, on any device. */
+const APP_BUILD=(document.querySelector('meta[name="app-build"]')||{}).content||'';
+async function checkForUpdate(){
+  try{
+    const base=location.href.split('#')[0].split('?')[0];
+    const r=await fetch(base+'?cb='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return;
+    const m=(await r.text()).match(/name="app-build"\s+content="([^"]*)"/i);
+    const live=m&&m[1];
+    if(!live||!APP_BUILD||live===APP_BUILD)return;
+    if(sessionStorage.getItem('pt_upd')===live)return;   // already reloaded for this build — never loop
+    sessionStorage.setItem('pt_upd',live);
+    location.replace(base+'?v='+encodeURIComponent(live));
+  }catch(e){}
+}
+
 /* ---------- scheduling ---------- */
 function reschedule(){
   if(timer)clearInterval(timer); if(countdown)clearInterval(countdown);
@@ -1567,6 +1588,7 @@ function setRange(r){
 
   applyView();
   loadLive(); reschedule();
+  checkForUpdate(); setInterval(checkForUpdate,300000);   // self-update: on open, then every 5 min
 })();
 </script>
 </body>
