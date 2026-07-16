@@ -399,7 +399,7 @@
     <div class="cfg-note">
       <span>⚠︎ For live pull to work, the sheet must be shared <b>Anyone with the link → Viewer</b>.</span>
       <a id="openSheet" href="#" target="_blank">Open sheet ↗</a>
-      <button class="btn ghost" id="resetDone" title="Un-mark all pours that were marked done">↺ Reset done marks</button>
+      <button class="btn ghost" id="resetDone" title="Re-open the last pour you closed">↶ Undo last done</button>
     </div>
   </div>
 
@@ -418,6 +418,7 @@
     </div>
     <div id="spot"></div>
     <div class="card" style="margin-top:14px"><h3>Active Pours</h3><div id="activeList"></div></div>
+    <div class="card" style="margin-top:14px" id="closedCard"><h3>Closed Pours</h3><div id="closedList"></div></div>
   </section>
 
   <!-- ALL POURS VIEW -->
@@ -467,9 +468,10 @@ async function stSet(k,v){
 const KEY_REQ='pourdash:req';
 const KEY_RATE='pourdash:rate';
 const KEY_DONE='pourdash:done';
+const KEY_DONE_ORDER='pourdash:doneorder';   // order pours were closed on THIS device, for Undo
 const KEY_CFG='pourdash:cfg';
 const KEY_PLAN='pourdash:plan';   // last-good plan cached so it never blanks out
-let REQ={}; let RATE={}; let DONE={}; let CFG={}; let REJECTED={}; let activeTab='ALL'; let view='summary'; let spotKey=null;
+let REQ={}; let RATE={}; let DONE={}; let DONE_ORDER=[]; let CFG={}; let REJECTED={}; let REJECTED_TODAY=0; let activeTab='ALL'; let view='summary'; let spotKey=null;
 let statusFilter=null;   // for clickable KPI tiles -> filter All Pours table
 let spotTab='overview';  // Active-now spotlight sub-tab: 'overview' | 'hourly'
 let lastPlanRange=null;   // when the plan sheet's date range changes, sync the program's date filter to it
@@ -510,7 +512,7 @@ function parsePlanTab(cols, matrix){
     req:findCol(header,['required','req','qty','quantity','كمي','مطلوب','m3','م3']),
     rate:findCol(header,['rate','ريت','معدل']),
     mix:findCol(header,['mix','grade','رتبة','درجة']),
-    client:findCol(header,['client','جهة','عميل']),
+    client:findCol(header,['contractor','client','جهة','عميل','مقاول']),
     sc:findCol(header,['sc','card','كارت']),
     pumps:findCol(header,['pump','مضخ','طلمب']),
     tem:findCol(header,['tem','temp','حرار']),
@@ -679,6 +681,9 @@ function enrichGroup(g, now){
   else if(g.depMin!=null && g.endMax!=null && g.endMax>g.depMin){ hrs=(g.endMax-g.depMin)/3600000; base=g.delivered; }
   g.hrs=hrs;
   g.rateCalc=(hrs&&hrs>0&&base>0)?base/hrs:null;
+  // Cumulative rate = total delivered ÷ full span (first truck → last activity) — the running pour's overall pace
+  g.cumHrs=(g.depMin!=null&&g.endMax!=null&&g.endMax>g.depMin)?(g.endMax-g.depMin)/3600000:null;
+  g.cumRate=(g.cumHrs&&g.cumHrs>0&&g.delivered>0)?g.delivered/g.cumHrs:null;
   const rm = g.rateManualPre!=null ? g.rateManualPre : num(RATE[g.key]);
   g.rateManual=rm>0?rm:null;
   g.rate = g.rateManual!=null ? g.rateManual : (g.planRate!=null ? g.planRate : g.rateCalc);
@@ -882,24 +887,30 @@ function timeShort(t){ if(t==null)return'—'; const d=new Date(t); let h=d.getH
 function setDiag(s){ const d=el('diag'); if(!d)return; d.style.display='block'; d.innerHTML=s; }
 function dateCell(g){ if(g.dates&&g.dates.size>1){const a=[...g.dates].sort();return `${a[0].slice(5)} → ${a[a.length-1].slice(5)} <span class="muted">(${g.dates.size}d)</span>`;} return g.dk; }
 function ringSvg(pct){
-  pct=Math.max(0,Math.min(100,pct||0));
-  const r=54, c=2*Math.PI*r, off=c*(1-pct/100), id='rg'+Math.round(pct*10);
+  const raw=pct||0;                                  // real delivered/required % (may exceed 100)
+  const p=Math.max(0,Math.min(100,raw));             // arc caps at a full circle
+  const r=54, c=2*Math.PI*r, off=c*(1-p/100), id='rg'+Math.round(p*10);
   return `<svg viewBox="0 0 130 130" class="ring">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#7c83ff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
     <circle cx="65" cy="65" r="${r}" class="ring-bg"/>
     <circle cx="65" cy="65" r="${r}" class="ring-fg" stroke="url(#${id})" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
-    <text x="65" y="62" class="ring-val">${fmt(pct,0)}%</text>
-    <text x="65" y="84" class="ring-lab">Complete</text>
+    <text x="65" y="62" class="ring-val">${fmt(raw,0)}%</text>
+    <text x="65" y="84" class="ring-lab">Delivered / Required</text>
   </svg>`;
 }
 
 // Bucket a pour's truck loads by clock hour -> m³ delivered per hour (= that hour's rate)
+// Hourly rate windows ANCHORED to the FIRST truck of the request (hh:mm of truck #1), then +1h each.
+// Each window's value = m³ actually loaded in that window (actual, not the target rate). Empty hours show 0.
 function hourlyBuckets(loads){
-  if(!loads||!loads.length)return [];
-  const m=new Map();
-  for(const l of loads){ if(l.t==null)continue; const h=Math.floor(l.t/3600000)*3600000; m.set(h,(m.get(h)||0)+(l.q||0)); }
-  return [...m.entries()].sort((a,b)=>a[0]-b[0]).map(([h,q])=>({h,q}));
+  const ts=(loads||[]).map(l=>l.t).filter(t=>t!=null);
+  if(!ts.length)return [];
+  const start=Math.min(...ts), end=Math.max(...ts);
+  const n=Math.floor((end-start)/3600000)+1;
+  const q=new Array(n).fill(0);
+  for(const l of loads){ if(l.t==null)continue; q[Math.floor((l.t-start)/3600000)]+=(l.q||0); }
+  return q.map((qq,idx)=>({h:start+idx*3600000, q:qq}));
 }
 function hourlyHtml(sp){
   const b=hourlyBuckets(sp.loads);
@@ -937,7 +948,9 @@ function render(res){
   const closed=started.filter(g=>g.status==='closed');                        // auto-closed (2h idle)
   // Upcoming = planned pours not started yet (0 trucks, has a target), excluding DONE
   const upcoming=withElem.filter(g=>g.trucks===0 && g.planReq!=null);
-  VD={full,summary,started,open,completed,closed,upcoming};
+  // Closed Pours = the ones the user marked DONE (shown read-only below, with what they poured)
+  const doneList=summary.filter(g=>hasElem(g) && g.trucks>0 && DONE[doneKey(g)]);
+  VD={full,summary,started,open,completed,closed,upcoming,doneList};
 
   renderViewTabs();
   renderSummary();
@@ -990,15 +1003,14 @@ function renderSummary(){
   const totDeliv=withReq.reduce((s,g)=>s+g.delivered,0);
   const totReq=withReq.reduce((s,g)=>s+g.required,0);
   const totRem=withReq.reduce((s,g)=>s+(g.remaining>0?g.remaining:0),0);
-  // Overall completion across ALL targeted pours (active + completed), capped per element
+  // Overall progress = total DELIVERED ÷ total REQUIRED across all targeted pours (may exceed 100%)
   const targetedAll=started.filter(g=>g.required!=null);
-  const fulfilled=targetedAll.reduce((s,g)=>s+Math.min(g.delivered,g.required),0);
+  const totDelivTargeted=targetedAll.reduce((s,g)=>s+g.delivered,0);
   const totReqAll=targetedAll.reduce((s,g)=>s+g.required,0);
-  const overallPct=totReqAll>0?Math.min(100,fulfilled/totReqAll*100):0;
+  const overallPct=totReqAll>0?(totDelivTargeted/totReqAll*100):0;
   const trucks=started.reduce((s,g)=>s+g.trucks,0);
   const rates=open.map(g=>g.rateCalc).filter(x=>x!=null&&x>0);
   const avgRate=rates.length?rates.reduce((a,b)=>a+b,0)/rates.length:null;
-  const behind=open.filter(g=>g.rateCalc!=null&&g.planRate!=null&&g.rateCalc<g.planRate*0.9).length;
   // Production totals from the RAW station data (LAST.matrix = every date, pre date-filter, waste already dropped):
   //   MTD  = poured since the 1st of the current month · Today = poured since 00:00 today.
   const prod=(function(){ const n=new Date();
@@ -1031,12 +1043,11 @@ function renderSummary(){
 
   // Overview (ring + stats)
   el('overview').innerHTML=`<div class="ov">
-    ${ringSvg(overallPct)}
+    <div class="ov-ring clk" title="Delivered ${fmt(totDelivTargeted,0)} m³  /  Required ${fmt(totReqAll,0)} m³" style="cursor:pointer">${ringSvg(overallPct)}</div>
     <div class="ov-stats">
       <div class="ov-s"><span class="l">Production MTD</span><span class="v">${fmt(prod.mtd,0)}<small>m³</small></span></div>
       <div class="ov-s"><span class="l">Production today</span><span class="v">${fmt(prod.today,0)}<small>m³</small></span></div>
-      <div class="ov-s"><span class="l">Behind schedule</span><span class="v" style="color:${behind?'var(--rose)':'var(--green)'}">${behind}</span></div>
-      <div class="ov-s"><span class="l">Completed volume</span><span class="v">${fmt(completed.reduce((s,g)=>s+g.delivered,0),0)}<small>m³</small></span></div>
+      <div class="ov-s"><span class="l">Rejected concrete Today</span><span class="v" style="color:${REJECTED_TODAY>0?'var(--amber)':'var(--faint)'}">${fmt(REJECTED_TODAY,0)}<small>m³</small></span></div>
     </div>
   </div>`;
 
@@ -1070,7 +1081,7 @@ function renderSummary(){
           <div class="spot-cell hi"><div class="s-lab">Remaining</div><div class="s-val" style="color:${sp.remaining!=null&&sp.remaining>0?'var(--rose)':'var(--green)'}">${sp.remaining!=null?(sp.remaining>0?fmt(sp.remaining)+' <small>m³</small>':'✓ <small>done</small>'):'—'}</div></div>
           <div class="spot-cell"><div class="s-lab">Rejected</div><div class="s-val" style="color:${sp.rejected>0?'var(--amber)':'var(--faint)'}">${sp.rejected>0?fmt(sp.rejected)+' <small>m³</small>':'—'}</div></div>
           <div class="spot-cell"><div class="s-lab">Required</div><div class="s-val">${sp.required!=null?fmt(sp.required):'—'} <small>m³</small></div></div>
-          <div class="spot-cell"><div class="s-lab">Actual rate</div><div class="s-val">${sp.rateCalc!=null?fmt(sp.rateCalc):'—'} <small>m³/h</small></div></div>
+          <div class="spot-cell"><div class="s-lab">Cumulative rate</div><div class="s-val">${sp.cumRate!=null?fmt(sp.cumRate):'—'} <small>m³/h</small></div></div>
           <div class="spot-cell"><div class="s-lab">Target rate</div><div class="s-val">${sp.planRate!=null?fmt(sp.planRate):(sp.rateManual!=null?fmt(sp.rateManual):'—')} <small>m³/h</small></div></div>
           <div class="spot-cell"><div class="s-lab">Est. finish</div><div class="s-val">${sp.finishAt?timeShort(sp.finishAt):(sp.remaining!=null&&sp.remaining<=0?'✓':'—')}</div></div>
         </div>
@@ -1102,7 +1113,7 @@ function renderSummary(){
   el('activeList').innerHTML = list.length ? list.map(g=>{
     const bc=barClass(g.status); const pct=g.pct!=null?Math.min(100,g.pct):0;
     return `<div class="apy">
-      <div class="apy-el">${g.elem||'—'}<span class="p">${g.plant||''}</span>${g.mix?`<div class="sub">${[g.mix,g.client].filter(Boolean).join(' · ')}</div>`:''}</div>
+      <div class="apy-el">${g.elem||'—'}<span class="p">${g.plant||''}</span>${(g.client||g.mix)?`<div class="sub">${[g.client,g.mix].filter(Boolean).join(' · ')}</div>`:''}</div>
       <div><div class="bar"><i class="${bc}" style="width:${pct}%"></i></div><div class="pct">${g.pct!=null?fmt(g.pct,0)+'%':'—'}</div></div>
       <div class="apy-num"><b>${fmt(g.delivered,0)}</b> / ${g.required!=null?fmt(g.required,0):'—'} m³</div>
       <div class="apy-rate">${g.rateCalc!=null?fmt(g.rateCalc)+' m³/h':'—'}</div>
@@ -1111,13 +1122,21 @@ function renderSummary(){
     </div>`;
   }).join('') : '<div class="muted" style="font-size:13px;padding:8px 4px">No active pours right now.</div>';
   el('activeList').querySelectorAll('.done-chk').forEach(chk=>{
-    chk.addEventListener('change',async()=>{
-      const k=decodeURIComponent(chk.dataset.e); const on=chk.checked;
-      if(on)DONE[k]=true; else delete DONE[k];      // same key as All Pours -> either one closes the pour
-      await stSet(KEY_DONE,DONE); rerender();
-      syncPush('done',k, on?1:'');
-    });
+    chk.addEventListener('change',()=>toggleDone(decodeURIComponent(chk.dataset.e), chk.checked));
   });
+
+  // ring is interactive -> click jumps to the All Pours table
+  const ring=el('overview').querySelector('.ov-ring');
+  if(ring) ring.addEventListener('click',async()=>{ view='pours'; activeTab='ALL'; statusFilter=null; await saveCfg(); renderViewTabs(); renderAllPours(); applyView(); const pv=el('poursView'); if(pv&&pv.scrollIntoView)pv.scrollIntoView({behavior:'smooth',block:'start'}); });
+
+  // Closed Pours (read-only): each pour the user closed + what it actually poured. A small Re-open per row.
+  const dl=(VD.doneList||[]).slice().sort((a,b)=>(b.endMax||0)-(a.endMax||0));
+  if(el('closedCard')) el('closedCard').style.display = dl.length ? '' : 'none';
+  el('closedList').innerHTML = dl.map(g=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:8px 0">
+      <div style="min-width:0"><span style="font-weight:800">${g.elem||'—'}</span><span style="font-family:var(--mono);font-size:11px;color:var(--faint);margin-inline-start:6px">${g.plant||''}</span>${(g.client||g.mix)?`<div style="font-size:11px;color:var(--faint);font-weight:500;margin-top:2px">${[g.client,g.mix].filter(Boolean).join(' · ')}</div>`:''}</div>
+      <div style="display:flex;align-items:center;gap:14px;white-space:nowrap"><span style="font-family:var(--mono);font-size:13px"><b style="color:var(--green)">${fmt(g.delivered,0)}</b> m³ poured</span><button class="btn ghost reopen-btn" data-e="${encodeURIComponent(doneKey(g))}" style="padding:3px 10px;font-size:12px">Re-open</button></div>
+    </div>`).join('');
+  el('closedList').querySelectorAll('.reopen-btn').forEach(b=>b.addEventListener('click',()=>toggleDone(decodeURIComponent(b.dataset.e), false)));
 }
 
 /* ---------- all pours view ---------- */
@@ -1196,12 +1215,7 @@ function renderAllPours(){
     });
   });
   el('tableArea').querySelectorAll('.done-chk').forEach(chk=>{
-    chk.addEventListener('change',async()=>{
-      const k=decodeURIComponent(chk.dataset.e); const on=chk.checked;
-      if(on)DONE[k]=true; else delete DONE[k];
-      await stSet(KEY_DONE,DONE); rerender();
-      syncPush('done',k, on?1:'');       // closing a pour hides it on EVERY device
-    });
+    chk.addEventListener('change',()=>toggleDone(decodeURIComponent(chk.dataset.e), chk.checked));
   });
 }
 
@@ -1351,6 +1365,15 @@ async function syncClear(type){
   if(r&&r.state && applyState(r.state)) rerender();
   return r;
 }
+// Central close/re-open used by every Done checkbox + the Undo button. Tracks the order pours were
+// closed (DONE_ORDER) so Undo can re-open the most recent one, and shares the change to every device.
+function toggleDone(k, on){
+  if(on){ DONE[k]=true; DONE_ORDER=DONE_ORDER.filter(x=>x!==k); DONE_ORDER.push(k); }
+  else  { delete DONE[k]; DONE_ORDER=DONE_ORDER.filter(x=>x!==k); }
+  stSet(KEY_DONE,DONE); stSet(KEY_DONE_ORDER,DONE_ORDER);
+  rerender();
+  syncPush('done',k, on?1:'');
+}
 
 function normalizeTab(cols, matrix, plantName){
   let header=null,dataRows=null;
@@ -1365,6 +1388,7 @@ function normalizeTab(cols, matrix, plantName){
   // Trucks flagged Waste or Rejected & Transferred were loaded but NOT poured — drop them so they don't
   // inflate the request total (status lives in the tab's "Follow Up"/"Action" column, next to the element).
   const EXCL=/waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
+  const TODAY_START=(function(){const n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime();})();
   const out=[]; let nQ=0,nT=0,nExcl=0;
   for(const row of dataRows){
     if(!row||row.length===0)continue;
@@ -1372,6 +1396,7 @@ function normalizeTab(cols, matrix, plantName){
     if(EXCL.test(fu)||EXCL.test(ac)){ nExcl++;
       const relem=c.elem>=0?String(row[c.elem]||''):''; const rq=num(row[c.q]); const rk=rejKey(relem);
       if(rk&&rq>0) REJECTED[rk]=(REJECTED[rk]||0)+rq;   // tally rejected m³ per element (shown in the spotlight)
+      const rd=parseDate(c.date>=0?row[c.date]:''); if(rd&&rq>0){ const rt=new Date(rd.y,rd.mo-1,rd.d).getTime(); if(rt>=TODAY_START) REJECTED_TODAY+=rq; }
       continue; }
     const q=num(row[c.q]); if(q>0)nQ++;
     const dep=c.dep>=0?(row[c.dep]||''):''; const end=c.end>=0?(row[c.end]||''):'';
@@ -1408,7 +1433,7 @@ async function loadLive(){
         document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.remove('active')); } }
   } else { try{console.log('Plan sheet not reachable — is it shared "Anyone with the link"?');}catch(e){} }
   let allRows=[]; const report=[]; let anyOk=false;
-  REJECTED={};   // recomputed fresh each pull from every station tab's Follow Up column
+  REJECTED={}; REJECTED_TODAY=0;   // recomputed fresh each pull from every station tab's Follow Up column
   for(const r of results){
     if(r.ok){ const nz=normalizeTab(r.cols,r.matrix,r.token);
       report.push(`<b>${r.token}</b>: ${nz.ok?nz.diag:('✗ '+(nz.diag||'no columns'))}`);
@@ -1498,6 +1523,7 @@ function setRange(r){
   if(savedPlan&&savedPlan.plan){ PLAN=savedPlan.plan; PLAN_ROWS=savedPlan.rows||[]; }
   RATE=(await stGet(KEY_RATE))||{};
   DONE=(await stGet(KEY_DONE))||{};
+  DONE_ORDER=(await stGet(KEY_DONE_ORDER))||[];
   const savedCfg=await stGet(KEY_CFG);
   if(savedCfg){
     if(savedCfg.sheetId)el('sheetId').value=savedCfg.sheetId;
@@ -1523,7 +1549,11 @@ function setRange(r){
 
   el('cfgToggle').addEventListener('click',()=>{ el('cfgPanel').classList.toggle('show'); });
   el('refreshBtn').addEventListener('click',()=>{ loadLive(); reschedule(); });   // force an immediate re-read
-  el('resetDone').addEventListener('click',async()=>{ if(confirm('Un-mark all done pours?')){ DONE={}; await stSet(KEY_DONE,DONE); rerender(); syncClear('done'); } });
+  el('resetDone').addEventListener('click',()=>{
+    const k=DONE_ORDER[DONE_ORDER.length-1];           // re-open the LAST pour closed on this device
+    if(k) toggleDone(k,false);
+    else if(el('footL')) el('footL').textContent='Nothing to undo';
+  });
   { const rb=el('reportBtn'); if(rb) rb.addEventListener('click',()=>{ if(buildReport()) window.print(); }); }
   el('loadBtn').addEventListener('click',async()=>{ await saveCfg(); loadLive(); reschedule(); el('cfgPanel').classList.remove('show'); });
   el('groupBy').addEventListener('change',async()=>{ await saveCfg(); rerender(); });
