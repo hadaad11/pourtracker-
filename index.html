@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260716-130730">
+<meta name="app-build" content="20260716-133859">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1013,17 +1013,7 @@ function renderSummary(){
   const trucks=started.reduce((s,g)=>s+g.trucks,0);
   const rates=open.map(g=>g.rateCalc).filter(x=>x!=null&&x>0);
   const avgRate=rates.length?rates.reduce((a,b)=>a+b,0)/rates.length:null;
-  // Production totals from the RAW station data (LAST.matrix = every date, pre date-filter, waste already dropped):
-  //   MTD  = poured since the 1st of the current month · Today = poured since 00:00 today.
-  const prod=(function(){ const n=new Date();
-    const monthStart=new Date(n.getFullYear(),n.getMonth(),1).getTime();
-    const todayStart=new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime();
-    let mtd=0,today=0;
-    for(const row of (LAST.matrix||[])){ const d=parseDate(row[0]); if(!d)continue;
-      const t=new Date(d.y,d.mo-1,d.d).getTime(); const q=num(row[3]);
-      if(t>=monthStart) mtd+=q; if(t>=todayStart) today+=q; }
-    return {mtd,today};
-  })();
+  const prod=PROD;   // straight from the trucks sheet's own daily production table (see loadProduction)
 
   // KPIs — Active / Completed / Upcoming are clickable to jump to a filtered list
   const cnum=(n,dec)=>`<span class="cnum" data-num="${n}" data-dec="${dec}">${fmt(n,dec)}</span>`;
@@ -1409,6 +1399,54 @@ function normalizeTab(cols, matrix, plantName){
   return {rows:out,n:out.length,ok:true,diag:`rows=${out.length} qty>0=${nQ} time=${nT}${nExcl?` · excluded ${nExcl} waste/rejected`:''} · ${cn}`};
 }
 
+/* ---------- production totals, straight from the trucks sheet ----------
+   The station tabs have a DATE FILTER applied, and gviz only returns the VISIBLE rows — so summing
+   them here would silently miss most of the month. The sheet already keeps its own daily production
+   table ("Production ( 12 AM : 12 AM )": Date | L1..V5 | Total), and /export?format=csv IGNORES the
+   filter, so we read that table directly. ~3 KB per pull vs ~4.9 MB for the raw tabs.
+   NOTE: these are the sheet's own GROSS numbers (waste included) — "Rejected concrete Today" is separate. */
+const PROD_GID='1257690697';
+let PROD={mtd:0,today:0};
+function parseCsvLine(line){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){ const ch=line[i];
+    if(ch==='"') q=!q;
+    else if(ch===',' && !q){ out.push(cur); cur=''; }
+    else cur+=ch; }
+  out.push(cur); return out;
+}
+async function loadProduction(){
+  try{
+    const id=el('sheetId').value.trim(); if(!id) return;
+    const r=await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${PROD_GID}&_=${Date.now()}`,{cache:'no-store'});
+    if(!r.ok) return;
+    const rows=(await r.text()).split(/\r?\n/).map(parseCsvLine);
+    let r0=-1,c0=-1;                                     // find the "12 AM : 12 AM" block (calendar day)
+    for(let i=0;i<Math.min(rows.length,6)&&r0<0;i++)
+      for(let j=0;j<rows[i].length;j++)
+        if(/12\s*AM\s*:\s*12\s*AM/i.test(rows[i][j]||'')){ r0=i; c0=j; break; }
+    if(r0<0) return;
+    const hdr=rows[r0+1]||[]; if(!/date/i.test(hdr[c0]||'')) return;
+    let totCol=-1;
+    for(let j=c0+1;j<Math.min(hdr.length,c0+10);j++) if(/total/i.test(hdr[j]||'')){ totCol=j; break; }
+    if(totCol<0) return;
+    const now=new Date();
+    const MON=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'][now.getMonth()];
+    const dayNow=now.getDate();
+    let mtd=0, td=0, seen=0;
+    for(let i=r0+2;i<rows.length;i++){
+      const cells=rows[i]; if(!cells||cells.length<=totCol) continue;
+      const m=String(cells[c0]||'').trim().match(/^(\d{1,2})\s*-\s*([A-Za-z]{3})/);
+      if(!m || m[2].toLowerCase()!==MON) continue;       // current month only
+      const q=parseFloat(String(cells[totCol]||'').replace(/[^0-9.]/g,''));
+      if(!isFinite(q)) continue;
+      mtd+=q; seen++;
+      if(+m[1]===dayNow) td=q;
+    }
+    if(seen) PROD={mtd,today:td};                        // keep the last good numbers if the table moved
+  }catch(e){}
+}
+
 async function loadLive(){
   const id=el('sheetId').value.trim();
   const tabs=el('tabs').value.split(',').map(t=>t.trim()).filter(Boolean);
@@ -1419,7 +1457,8 @@ async function loadLive(){
   const [results, planRes]=await Promise.all([
     Promise.all(tabs.map(t=>fetchTab(id,t))),
     fetchTab(planSid, ''),
-    syncPull()          // shared Done/Required/Rate from the sheet (no-op when Sync URL is empty)
+    syncPull(),         // shared Done/Required/Rate from the sheet (no-op when Sync URL is empty)
+    loadProduction()    // MTD / today straight from the sheet's own daily production table
   ]);
   if(planRes && planRes.ok){
     const parsed=parsePlanTab(planRes.cols, planRes.matrix) || parsePlanPositional(planRes.cols, planRes.matrix);
