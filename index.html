@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260716-133859">
+<meta name="app-build" content="20260719-103257">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -683,7 +683,7 @@ function enrichGroup(g, now){
   else if(g.depMin!=null && g.endMax!=null && g.endMax>g.depMin){ hrs=(g.endMax-g.depMin)/3600000; base=g.delivered; }
   g.hrs=hrs;
   g.rateCalc=(hrs&&hrs>0&&base>0)?base/hrs:null;
-  // Cumulative rate = total delivered ÷ full span (first truck → last activity) — the running pour's overall pace
+  // Average rate = total delivered ÷ full span (first truck → last activity) — the running pour's overall pace
   g.cumHrs=(g.depMin!=null&&g.endMax!=null&&g.endMax>g.depMin)?(g.endMax-g.depMin)/3600000:null;
   g.cumRate=(g.cumHrs&&g.cumHrs>0&&g.delivered>0)?g.delivered/g.cumHrs:null;
   const rm = g.rateManualPre!=null ? g.rateManualPre : num(RATE[g.key]);
@@ -897,8 +897,9 @@ function ringSvg(pct){
       <stop offset="0" stop-color="#7c83ff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
     <circle cx="65" cy="65" r="${r}" class="ring-bg"/>
     <circle cx="65" cy="65" r="${r}" class="ring-fg" stroke="url(#${id})" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
-    <text x="65" y="62" class="ring-val">${fmt(raw,0)}%</text>
-    <text x="65" y="84" class="ring-lab">Delivered / Required</text>
+    <text x="65" y="60" class="ring-val">${fmt(raw,0)}%</text>
+    <text x="65" y="80" class="ring-lab">Delivered</text>
+    <text x="65" y="94" class="ring-lab">/ Required</text>
   </svg>`;
 }
 
@@ -1073,7 +1074,7 @@ function renderSummary(){
           <div class="spot-cell hi"><div class="s-lab">Remaining</div><div class="s-val" style="color:${sp.remaining!=null&&sp.remaining>0?'var(--rose)':'var(--green)'}">${sp.remaining!=null?(sp.remaining>0?fmt(sp.remaining)+' <small>m³</small>':'✓ <small>done</small>'):'—'}</div></div>
           <div class="spot-cell"><div class="s-lab">Rejected</div><div class="s-val" style="color:${sp.rejected>0?'var(--amber)':'var(--faint)'}">${sp.rejected>0?fmt(sp.rejected)+' <small>m³</small>':'—'}</div></div>
           <div class="spot-cell"><div class="s-lab">Required</div><div class="s-val">${sp.required!=null?fmt(sp.required):'—'} <small>m³</small></div></div>
-          <div class="spot-cell"><div class="s-lab">Cumulative rate</div><div class="s-val">${sp.cumRate!=null?fmt(sp.cumRate):'—'} <small>m³/h</small></div></div>
+          <div class="spot-cell"><div class="s-lab">Average rate</div><div class="s-val">${sp.cumRate!=null?fmt(sp.cumRate):'—'} <small>m³/h</small></div></div>
           <div class="spot-cell"><div class="s-lab">Target rate</div><div class="s-val">${sp.planRate!=null?fmt(sp.planRate):(sp.rateManual!=null?fmt(sp.rateManual):'—')} <small>m³/h</small></div></div>
           <div class="spot-cell"><div class="s-lab">Est. finish</div><div class="s-val">${sp.finishAt?timeShort(sp.finishAt):(sp.remaining!=null&&sp.remaining<=0?'✓':'—')}</div></div>
         </div>
