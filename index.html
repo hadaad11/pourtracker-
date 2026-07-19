@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260719-103257">
+<meta name="app-build" content="20260719-111405">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -326,6 +326,32 @@
     table.rep th{background:#f1f2f8;color:#333}
     table.rep td.n{font-family:var(--mono);font-weight:700}
     .rep-foot{margin-top:14px;font-size:10.5px;color:#888;border-top:1px solid #eee;padding-top:8px}
+  }
+
+  /* ===== Glass finish — same layout, frosted translucent surfaces over the animated background ===== */
+  :root{
+    --glass:rgba(24,30,50,.55); --glass2:rgba(30,38,62,.40); --glass-brd:rgba(255,255,255,.14);
+    --blur:blur(18px) saturate(1.5); --glass-hi:inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi{
+    background:linear-gradient(180deg,var(--glass),var(--glass2)) !important;
+    -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur);
+    border-color:var(--glass-brd); box-shadow:var(--shadow),var(--glass-hi);
+  }
+  .spot{
+    background:linear-gradient(135deg,rgba(124,131,255,.22),rgba(34,211,238,.12),rgba(30,38,62,.42)) !important;
+    -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur);
+    border-color:var(--glass-brd); box-shadow:var(--shadow),var(--glass-hi);
+  }
+  .vtabs,.spot-tabs{ -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); border-color:var(--glass-brd) }
+  #closedList>div,.apy{ border-color:var(--line) }
+  thead th{ -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px) }
+  input,select,.chip,.ptab,.btn.ghost,.live-pill{ -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px) }
+  /* a touch more depth in the page backdrop so the frost has colour to catch */
+  body::before{ filter:saturate(1.15) }
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    /* older engines: fall back to solid panels so nothing turns unreadable */
+    .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi{ background:linear-gradient(180deg,var(--panel),var(--panel2)) !important }
   }
 </style>
 </head>
