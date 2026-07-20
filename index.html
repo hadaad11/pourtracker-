@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260719-111405">
+<meta name="app-build" content="20260720-093343">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -33,15 +33,13 @@
   html,body{margin:0;padding:0}
   body{color:var(--ink);font-family:var(--sans);font-size:15px;min-height:100vh;
     position:relative;overflow-x:hidden;background:var(--bg);-webkit-font-smoothing:antialiased}
-  body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none;
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:
       radial-gradient(50% 45% at 12% 6%,rgba(124,131,255,.22),transparent 60%),
       radial-gradient(46% 42% at 90% 4%,rgba(34,211,238,.16),transparent 60%),
       radial-gradient(50% 50% at 84% 92%,rgba(167,139,250,.18),transparent 60%),
-      radial-gradient(50% 50% at 8% 96%,rgba(52,211,153,.12),transparent 60%);
-    animation:bgdrift 26s ease-in-out infinite alternate}
-  @keyframes bgdrift{0%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(2%,-2%,0) scale(1.06)}100%{transform:translate3d(-2%,2%,0) scale(1.03)}}
-  @media(prefers-reduced-motion:reduce){body::before{animation:none}}
+      radial-gradient(50% 50% at 8% 96%,rgba(52,211,153,.12),transparent 60%)}
+  /* background is now STATIC — a moving bg forces every frosted panel to re-blur each frame (slow on mobile) */
   @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes glowpulse{0%,100%{box-shadow:0 14px 44px rgba(0,0,0,.42),0 0 0 0 rgba(34,211,238,.0)}50%{box-shadow:0 14px 44px rgba(0,0,0,.42),0 0 24px 2px rgba(34,211,238,.22)}}
   @keyframes sheen{0%{background-position:-140% 0}60%,100%{background-position:140% 0}}
@@ -51,10 +49,7 @@
   .kpi:hover{transform:translateY(-3px)}
   #summaryView>.grid2,#summaryView>.card,#summaryView>#spot{animation:fadeInUp .4s ease both}
   .spot{position:relative;overflow:hidden}
-  .spot::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.06) 50%,transparent 70%);
-    background-size:250% 100%;animation:sheen 6s ease-in-out infinite}
-  .spot.livepour{animation:glowpulse 2.6s ease-in-out infinite}
+  /* dropped the continuous sheen + glow-pulse animations — pure eye-candy that cost frames every second */
   .bar>i{transition:width .6s cubic-bezier(.2,.8,.2,1)}
 
   .wrap{max-width:1280px;margin:0 auto;padding:20px 16px 70px}
@@ -330,25 +325,19 @@
 
   /* ===== Glass finish — same layout, frosted translucent surfaces over the animated background ===== */
   :root{
-    --glass:rgba(24,30,50,.55); --glass2:rgba(30,38,62,.40); --glass-brd:rgba(255,255,255,.14);
-    --blur:blur(18px) saturate(1.5); --glass-hi:inset 0 1px 0 rgba(255,255,255,.12);
+    --glass:rgba(24,30,50,.62); --glass2:rgba(30,38,62,.50); --glass-brd:rgba(255,255,255,.14);
+    --blur:blur(11px) saturate(1.25); --glass-hi:inset 0 1px 0 rgba(255,255,255,.12);
   }
-  .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi{
-    background:linear-gradient(180deg,var(--glass),var(--glass2)) !important;
+  /* Blur ONLY the big surfaces (few, large). The many small elements stay translucent but un-blurred —
+     the static background keeps this cheap; more blurred layers = slower, esp. on mobile. */
+  .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi,.spot{
     -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur);
     border-color:var(--glass-brd); box-shadow:var(--shadow),var(--glass-hi);
   }
-  .spot{
-    background:linear-gradient(135deg,rgba(124,131,255,.22),rgba(34,211,238,.12),rgba(30,38,62,.42)) !important;
-    -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur);
-    border-color:var(--glass-brd); box-shadow:var(--shadow),var(--glass-hi);
-  }
-  .vtabs,.spot-tabs{ -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); border-color:var(--glass-brd) }
+  .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi{ background:linear-gradient(180deg,var(--glass),var(--glass2)) !important }
+  .spot{ background:linear-gradient(135deg,rgba(124,131,255,.24),rgba(34,211,238,.13),rgba(30,38,62,.52)) !important }
+  .vtabs,.spot-tabs{ border-color:var(--glass-brd) }
   #closedList>div,.apy{ border-color:var(--line) }
-  thead th{ -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px) }
-  input,select,.chip,.ptab,.btn.ghost,.live-pill{ -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px) }
-  /* a touch more depth in the page backdrop so the frost has colour to catch */
-  body::before{ filter:saturate(1.15) }
   @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
     /* older engines: fall back to solid panels so nothing turns unreadable */
     .panel,.top,.config,.card,.tbl-wrap,.ucard,.kpi{ background:linear-gradient(180deg,var(--panel),var(--panel2)) !important }
@@ -356,6 +345,16 @@
 </style>
 </head>
 <body>
+<div id="authGate" style="position:fixed;inset:0;z-index:9999;display:none;place-items:center;background:rgba(8,11,22,.72);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)">
+  <form id="authForm" autocomplete="off" style="width:min(360px,90vw);padding:26px 24px;border-radius:20px;border:1px solid var(--glass-brd);background:linear-gradient(180deg,var(--glass),var(--glass2));-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:var(--shadow);text-align:center">
+    <div style="width:56px;height:56px;margin:0 auto 12px;border-radius:15px;overflow:hidden;box-shadow:0 8px 22px rgba(124,131,255,.5)"><img src="icons/icon-192.png" alt="" style="width:100%;height:100%;object-fit:cover"></div>
+    <div style="font-weight:800;font-size:18px;letter-spacing:-.3px">Pour Tracker</div>
+    <div style="color:var(--muted);font-size:12.5px;margin:4px 0 16px">Enter password to continue</div>
+    <input type="password" id="authPass" placeholder="Password" autocomplete="current-password" style="width:100%;text-align:center;font-family:var(--sans);letter-spacing:2px">
+    <button class="btn" type="submit" style="width:100%;margin-top:12px;justify-content:center">Enter</button>
+    <div id="authErr" style="color:var(--rose);font-size:12.5px;margin-top:10px;min-height:16px"></div>
+  </form>
+</div>
 <div class="wrap">
 
   <div class="top">
@@ -428,6 +427,7 @@
       <span>⚠︎ For live pull to work, the sheet must be shared <b>Anyone with the link → Viewer</b>.</span>
       <a id="openSheet" href="#" target="_blank">Open sheet ↗</a>
       <button class="btn ghost" id="resetDone" title="Re-open the last pour you closed">↶ Undo last done</button>
+      <button class="btn ghost" id="logoutBtn" title="Lock this device — password needed to open again">🔒 Logout</button>
     </div>
   </div>
 
@@ -544,6 +544,7 @@ function parsePlanTab(cols, matrix){
     sc:findCol(header,['sc','card','كارت']),
     pumps:findCol(header,['pump','مضخ','طلمب']),
     tem:findCol(header,['tem','temp','حرار']),
+    es:header.findIndex(h=>/^\s*es\s*$/i.test(String(h||''))),   // unique per-pour ID (matches the trucks' ES)
   };
   if(c.code<0||c.req<0) return null;
   const entries=[];
@@ -551,7 +552,7 @@ function parsePlanTab(cols, matrix){
     if(!row) continue;
     const code=String(row[c.code]||'').trim().toUpperCase().replace(/\s+/g,'');
     if(!code) continue;
-    entries.push({ code, req: num(row[c.req]), rate: c.rate>=0?num(row[c.rate]):0,
+    entries.push({ code, es: c.es>=0?String(row[c.es]||'').trim():'', req: num(row[c.req]), rate: c.rate>=0?num(row[c.rate]):0,
       mix: c.mix>=0?String(row[c.mix]||'').trim():'', client: c.client>=0?String(row[c.client]||'').trim():'',
       sc: c.sc>=0?String(row[c.sc]||'').trim():'', pumps: c.pumps>=0?String(row[c.pumps]||'').trim():'',
       tem: c.tem>=0?String(row[c.tem]||'').trim():'' });
@@ -772,11 +773,10 @@ function aggregateByElement(full){
 function buildPours(full, now){
   now = now||Date.now();
   const elemAggs = aggregateByElement(full);
-  const aggByBase = new Map();
-  for(const g of elemAggs){ const b=(planKey(g.elem)||(g.elem||'').toString()); if(!aggByBase.has(b))aggByBase.set(b,g); }
-  const rowsByBase = {};
-  for(const r of PLAN_ROWS){ (rowsByBase[r.base]=rowsByBase[r.base]||[]).push(r); }
-  const out=[]; const usedBases=new Set();
+  const aggByKey = new Map();   // key = the value trucks carry in the "ES" column: an ES id OR an element code
+  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(!aggByKey.has(k))aggByKey.set(k,g); }
+  const out=[]; const usedKeys=new Set();
+  const baseCount={}; for(const r of PLAN_ROWS){ baseCount[r.base]=(baseCount[r.base]||0)+1; }
 
   function subPour(row, agg, delivered, loads, label){
     const times=(loads||[]).map(l=>l.t).filter(t=>t!=null);
@@ -794,10 +794,31 @@ function buildPours(full, now){
   function labelFor(rows,i){ const r=rows[i]; if(rows.length<2) return r.code;
     const sameCode=rows.filter(x=>x.code===r.code).length>1; return sameCode ? (r.base+' #'+(i+1)) : r.code; }
 
+  // ---- ES pass: a plan row with an ES id maps to trucks by EXACT ES (unique -> no waterfall guessing).
+  //      During the transition it also folds in element-code trucks of the SAME code, but only when that
+  //      code appears once in the plan (otherwise the bare code is ambiguous and must be ES-tagged). ----
+  const esHandled=new Set();
+  for(const r of PLAN_ROWS){
+    if(!r.es) continue;
+    esHandled.add(r);
+    const esKey=String(r.es).trim();
+    let loads=[]; let meta=null;
+    const esAgg=aggByKey.get(esKey);
+    if(esAgg){ loads=loads.concat(esAgg.loads||[]); meta=meta||esAgg; usedKeys.add(esKey); }
+    if(baseCount[r.base]===1){ const cAgg=aggByKey.get(r.base); if(cAgg){ loads=loads.concat(cAgg.loads||[]); meta=meta||cAgg; usedKeys.add(r.base); } }
+    loads.sort((a,b)=>(a.t||0)-(b.t||0));
+    const delivered=loads.reduce((s,l)=>s+(l.q||0),0);
+    const p=subPour(r, meta, delivered, loads, r.code); p.esId=esKey;
+    out.push(p);
+  }
+
+  // ---- element-code pass (original behaviour) for plan rows that DON'T have an ES yet ----
+  const rowsByBase={};
+  for(const r of PLAN_ROWS){ if(esHandled.has(r)) continue; (rowsByBase[r.base]=rowsByBase[r.base]||[]).push(r); }
   for(const base in rowsByBase){
-    usedBases.add(base);
+    usedKeys.add(base);
     const rows=rowsByBase[base];
-    const agg=aggByBase.get(base);
+    const agg=aggByKey.get(base);
     if(rows.length===1){
       if(agg) out.push(agg); else out.push(subPour(rows[0], null, 0, [], rows[0].code));
       continue;
@@ -811,8 +832,8 @@ function buildPours(full, now){
     }
     rows.forEach((r,i)=> out.push(subPour(r, agg, alloc[i].delivered, alloc[i].loads, labelFor(rows,i))));
   }
-  // elements that have trucks but no plan row (no target) -> keep as-is
-  for(const g of elemAggs){ const b=(planKey(g.elem)||(g.elem||'').toString()); if(!usedBases.has(b)) out.push(g); }
+  // ---- truck groups with no plan row (untagged ES ids or codes) -> keep as-is ----
+  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(!usedKeys.has(k)) out.push(g); }
 
   out.sort((x,y)=>(y.endMax||0)-(x.endMax||0));
   return out;
@@ -1399,7 +1420,9 @@ function normalizeTab(cols, matrix, plantName){
   if(cols && looksHeader(cols)){ header=cols; dataRows=matrix; }
   else{ for(let i=0;i<Math.min(matrix.length,12);i++){ if(looksHeader(matrix[i])){header=matrix[i];dataRows=matrix.slice(i+1);break;} } }
   if(!header) return {rows:[],n:0,ok:false,diag:'no header row with Date+QM3'};
-  const c={ date:findCol(header,['date','تاريخ']), elem:findCol(header,['element','عنصر','بند','kks']),
+  const c={ date:findCol(header,['date','تاريخ']),
+    // grouping key = the "ES" column (unique pour ID) if present, else the old "Element" column
+    elem:(function(){const i=header.findIndex(h=>/^\s*es\s*$/i.test(String(h||'')));return i>=0?i:findCol(header,['element','عنصر','بند','kks']);})(),
     q:findCol(header,['qm3','concrete','m3','كمي','quantity','qty','volume']), dep:findCol(header,['departure','خروج','load']),
     end:findCol(header,['end','finish','انتهاء']), truck:findCol(header,['truck','mixer','تراك','عربية']),
     follow:findCol(header,['follow up','follow','متابعة']), action:findCol(header,['action','إجراء']) };
@@ -1604,7 +1627,32 @@ function setRange(r){
 }
 
 /* ---------- init ---------- */
+/* ---------- access gate ----------
+   Deterrent password on a public page: the plaintext is NEVER in the code — only its SHA-256 hash.
+   Set AUTH_HASH='' to turn the gate off. Once entered on a device it's remembered (localStorage). */
+const AUTH_HASH='';   // gate OFF — set to a sha256 hex to require a password
+const KEY_AUTH='pourdash:auth';
+async function sha256hex(s){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function requireAuth(){
+  if(!AUTH_HASH||AUTH_HASH==='__SET_ME__') return Promise.resolve(true);   // gate not configured yet
+  try{ if(localStorage.getItem(KEY_AUTH)===AUTH_HASH) return Promise.resolve(true); }catch(e){}
+  return new Promise(resolve=>{
+    const gate=el('authGate'); gate.style.display='grid';
+    el('authPass').focus();
+    el('authForm').addEventListener('submit',async(e)=>{
+      e.preventDefault();
+      const h=await sha256hex(el('authPass').value);
+      if(h===AUTH_HASH){ try{localStorage.setItem(KEY_AUTH,AUTH_HASH);}catch(e){} gate.style.display='none'; resolve(true); }
+      else { el('authErr').textContent='كلمة السر غلط'; el('authPass').value=''; el('authPass').focus(); }
+    });
+  });
+}
+
 (async function init(){
+  await requireAuth();          // block the whole app until the password is entered
   REQ=(await stGet(KEY_REQ))||{};
   const savedPlan=await stGet(KEY_PLAN);   // show last-good plan instantly (survives edits / offline)
   if(savedPlan&&savedPlan.plan){ PLAN=savedPlan.plan; PLAN_ROWS=savedPlan.rows||[]; }
@@ -1642,6 +1690,7 @@ function setRange(r){
     else if(el('footL')) el('footL').textContent='Nothing to undo';
   });
   { const rb=el('reportBtn'); if(rb) rb.addEventListener('click',()=>{ if(buildReport()) window.print(); }); }
+  { const lb=el('logoutBtn'); if(lb) lb.addEventListener('click',()=>{ try{localStorage.removeItem(KEY_AUTH);}catch(e){} location.reload(); }); }
   el('loadBtn').addEventListener('click',async()=>{ await saveCfg(); loadLive(); reschedule(); el('cfgPanel').classList.remove('show'); });
   el('groupBy').addEventListener('change',async()=>{ await saveCfg(); rerender(); });
   const onDateChange=async()=>{ await saveCfg(); rerender();
