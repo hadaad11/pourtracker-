@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260720-143142">
+<meta name="app-build" content="20260720-144005">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -809,6 +809,9 @@ function buildPours(full, now){
     loads.sort((a,b)=>(a.t||0)-(b.t||0));
     const delivered=loads.reduce((s,l)=>s+(l.q||0),0);
     const p=subPour(r, meta, delivered, loads, r.code); p.esId=esKey;
+    // rejected m³ for this pour: rejected trucks now carry the ES id, so REJECTED is keyed by ES —
+    // add that to any code-keyed rejects enrichGroup already found (different keys, no double count).
+    p.rejected = (REJECTED[rejKey(esKey)]||0) + (p.rejected||0);
     out.push(p);
   }
 
