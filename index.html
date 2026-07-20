@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260720-144005">
+<meta name="app-build" content="20260720-150037">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1715,6 +1715,8 @@ function requireAuth(){
   loadLive(); reschedule();
   checkForUpdate(); setInterval(checkForUpdate,300000);   // self-update: on open, then every 5 min
 })();
+// Register the service worker so the installed PWA opens offline (network-first — see sw.js).
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }); }
 </script>
 </body>
 </html>
