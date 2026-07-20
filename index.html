@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260720-104556">
+<meta name="app-build" content="20260720-143142">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -832,12 +832,8 @@ function buildPours(full, now){
     }
     rows.forEach((r,i)=> out.push(subPour(r, agg, alloc[i].delivered, alloc[i].loads, labelFor(rows,i))));
   }
-  // ---- truck groups with no plan row -> keep as-is; trucks with a BLANK ES become one clear
-  //      "Unassigned — no ES" pour so the manager sees the volume that still needs tagging (not hidden). ----
-  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(usedKeys.has(k)) continue;
-    if(g.elem===NOEL||!String(g.elem||'').trim()){ g.elem='Unassigned — no ES'; g.unassigned=true; }
-    out.push(g);
-  }
+  // ---- truck groups with no plan row (ES id not in the plan) -> keep as-is ----
+  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(!usedKeys.has(k)) out.push(g); }
 
   out.sort((x,y)=>(y.endMax||0)-(x.endMax||0));
   return out;
@@ -908,7 +904,9 @@ function build(matrix, colHeader){
     const end=c.end>=0?parseTime(row[c.end]):null;
     const depT=ts(dObj,dep); let endT=ts(dObj,end);
     if(endT!=null&&depT!=null&&endT<depT)endT+=86400000;
-    g.loads.push({t:(endT!=null?endT:depT), q});   // per-truck record for hourly-rate breakdown
+    // hourly-rate breakdown buckets by LOAD time = Departure (when the truck left the plant), NOT END/arrival —
+    // so each window shows the m³ actually LOADED in that hour. Fall back to END only if departure is blank.
+    g.loads.push({t:(depT!=null?depT:endT), q});
     if(depT!=null&&(g.depMin==null||depT<g.depMin))g.depMin=depT;
     if(endT!=null&&(g.endMax==null||endT>g.endMax))g.endMax=endT;
     if(depT!=null&&(g.endMax==null||depT>g.endMax))g.endMax=depT;
@@ -954,9 +952,9 @@ function ringSvg(pct){
   </svg>`;
 }
 
-// Bucket a pour's truck loads by clock hour -> m³ delivered per hour (= that hour's rate)
-// Hourly rate windows ANCHORED to the FIRST truck of the request (hh:mm of truck #1), then +1h each.
-// Each window's value = m³ actually loaded in that window (actual, not the target rate). Empty hours show 0.
+// Bucket a pour's truck loads by clock hour -> m³ LOADED per hour (= that hour's actual rate).
+// Windows are ANCHORED to the first truck's DEPARTURE (load) time, then +1h each. Each window's value =
+// m³ of the trucks whose DEPARTURE falls inside it (actual loaded volume, not the target rate). Empty hours show 0.
 function hourlyBuckets(loads){
   const ts=(loads||[]).map(l=>l.t).filter(t=>t!=null);
   if(!ts.length)return [];
@@ -1424,9 +1422,11 @@ function normalizeTab(cols, matrix, plantName){
   if(cols && looksHeader(cols)){ header=cols; dataRows=matrix; }
   else{ for(let i=0;i<Math.min(matrix.length,12);i++){ if(looksHeader(matrix[i])){header=matrix[i];dataRows=matrix.slice(i+1);break;} } }
   if(!header) return {rows:[],n:0,ok:false,diag:'no header row with Date+QM3'};
+  // grouping key = the "ES" column (unique pour ID) if present, else the old "Element" column.
+  // esMode = the sheet uses ES ids: a truck with a BLANK ES is untagged -> we drop it entirely (never read/shown).
+  const esCol=header.findIndex(h=>/^\s*es\s*$/i.test(String(h||''))); const esMode=esCol>=0;
   const c={ date:findCol(header,['date','تاريخ']),
-    // grouping key = the "ES" column (unique pour ID) if present, else the old "Element" column
-    elem:(function(){const i=header.findIndex(h=>/^\s*es\s*$/i.test(String(h||'')));return i>=0?i:findCol(header,['element','عنصر','بند','kks']);})(),
+    elem: esMode?esCol:findCol(header,['element','عنصر','بند','kks']),
     q:findCol(header,['qm3','concrete','m3','كمي','quantity','qty','volume']), dep:findCol(header,['departure','خروج','load']),
     end:findCol(header,['end','finish','انتهاء']), truck:findCol(header,['truck','mixer','تراك','عربية']),
     follow:findCol(header,['follow up','follow','متابعة']), action:findCol(header,['action','إجراء']) };
@@ -1436,8 +1436,11 @@ function normalizeTab(cols, matrix, plantName){
   const EXCL=/waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
   const TODAY_START=(function(){const n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime();})();
   const out=[]; let nQ=0,nT=0,nExcl=0;
+  let nNoEs=0;
   for(const row of dataRows){
     if(!row||row.length===0)continue;
+    // ES rule: a truck with no ES id is not attributed to any pour -> ignore it completely.
+    if(esMode && !String(row[esCol]==null?'':row[esCol]).trim()){ nNoEs++; continue; }
     const fu=c.follow>=0?String(row[c.follow]||''):''; const ac=c.action>=0?String(row[c.action]||''):'';
     if(EXCL.test(fu)||EXCL.test(ac)){ nExcl++;
       const relem=c.elem>=0?String(row[c.elem]||''):''; const rq=num(row[c.q]); const rk=rejKey(relem);
@@ -1449,8 +1452,8 @@ function normalizeTab(cols, matrix, plantName){
     if((dep&&parseTime(dep)!=null)||(end&&parseTime(end)!=null))nT++;
     out.push([ row[c.date]||'', plantName, c.elem>=0?(row[c.elem]||''):'', row[c.q]||'', dep, end, c.truck>=0?(row[c.truck]||''):'' ]);
   }
-  const cn=`date#${c.date} elem#${c.elem} q#${c.q} dep#${c.dep} end#${c.end} follow#${c.follow}`;
-  return {rows:out,n:out.length,ok:true,diag:`rows=${out.length} qty>0=${nQ} time=${nT}${nExcl?` · excluded ${nExcl} waste/rejected`:''} · ${cn}`};
+  const cn=`date#${c.date} elem#${c.elem}${esMode?'(ES)':''} q#${c.q} dep#${c.dep} end#${c.end} follow#${c.follow}`;
+  return {rows:out,n:out.length,ok:true,diag:`rows=${out.length} qty>0=${nQ} time=${nT}${nExcl?` · excluded ${nExcl} waste/rejected`:''}${nNoEs?` · skipped ${nNoEs} no-ES`:''} · ${cn}`};
 }
 
 /* ---------- production totals, straight from the trucks sheet ----------
