@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260720-093343">
+<meta name="app-build" content="20260720-104556">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -832,8 +832,12 @@ function buildPours(full, now){
     }
     rows.forEach((r,i)=> out.push(subPour(r, agg, alloc[i].delivered, alloc[i].loads, labelFor(rows,i))));
   }
-  // ---- truck groups with no plan row (untagged ES ids or codes) -> keep as-is ----
-  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(!usedKeys.has(k)) out.push(g); }
+  // ---- truck groups with no plan row -> keep as-is; trucks with a BLANK ES become one clear
+  //      "Unassigned — no ES" pour so the manager sees the volume that still needs tagging (not hidden). ----
+  for(const g of elemAggs){ const k=(planKey(g.elem)||(g.elem||'').toString()); if(usedKeys.has(k)) continue;
+    if(g.elem===NOEL||!String(g.elem||'').trim()){ g.elem='Unassigned — no ES'; g.unassigned=true; }
+    out.push(g);
+  }
 
   out.sort((x,y)=>(y.endMax||0)-(x.endMax||0));
   return out;
