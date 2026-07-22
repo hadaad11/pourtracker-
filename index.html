@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260722-170424">
+<meta name="app-build" content="20260722-211138">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -280,6 +280,8 @@
     color:var(--ink);border-radius:12px;padding:11px;font-family:var(--mono);font-size:12px;resize:vertical}
   .foot{margin-top:24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
     color:var(--muted);font-size:12px;font-family:var(--mono)}
+  /* admin toggle, lit while admin mode is on */
+  .btn.on{border-color:rgba(34,197,94,.55);background:rgba(34,197,94,.14);color:var(--green)}
   /* live presence pill — how many devices have the dashboard open right now */
   .online{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
     border:1px solid var(--line2);background:rgba(34,197,94,.10);color:var(--muted);white-space:nowrap}
@@ -362,6 +364,17 @@
     <div id="authErr" style="color:var(--rose);font-size:12.5px;margin-top:10px;min-height:16px"></div>
   </form>
 </div>
+<!-- Asked once per device: the name shown in "who's viewing" and against every edit in the admin log -->
+<div id="nameGate" style="position:fixed;inset:0;z-index:9998;display:none;place-items:center;background:rgba(8,11,22,.72);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)">
+  <form id="nameForm" autocomplete="off" style="width:min(380px,90vw);padding:26px 24px;border-radius:20px;border:1px solid var(--glass-brd);background:linear-gradient(180deg,var(--glass),var(--glass2));-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:var(--shadow);text-align:center">
+    <div style="width:56px;height:56px;margin:0 auto 12px;border-radius:15px;overflow:hidden;box-shadow:0 8px 22px rgba(124,131,255,.5)"><img src="icons/icon-192.png" alt="" style="width:100%;height:100%;object-fit:cover"></div>
+    <div style="font-weight:800;font-size:18px;letter-spacing:-.3px">Pour Tracker</div>
+    <div style="color:var(--muted);font-size:12.5px;margin:4px 0 16px">اكتب اسمك — هيظهر لمدير النظام مع أي تعديل تعمله</div>
+    <input type="text" id="nameInp" placeholder="اسمك" style="width:100%;text-align:center;font-family:var(--sans)">
+    <button class="btn" type="submit" style="width:100%;margin-top:12px;justify-content:center">دخول</button>
+    <div id="nameErr" style="color:var(--rose);font-size:12.5px;margin-top:10px;min-height:16px"></div>
+  </form>
+</div>
 <div class="wrap">
 
   <div class="top">
@@ -381,19 +394,19 @@
   <!-- CONFIG -->
   <div class="config" id="cfgPanel">
     <div class="cfg-row">
-      <div class="field grow">
+      <div class="field grow adm">
         <label>Sheet ID</label>
         <input id="sheetId" dir="ltr" value="1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE">
       </div>
-      <div class="field" style="width:200px">
+      <div class="field adm" style="width:200px">
         <label>Station tabs (comma-separated)</label>
         <input id="tabs" dir="ltr" value="L1,L2,V3,V4,V5">
       </div>
-      <div class="field grow" style="min-width:240px">
+      <div class="field grow adm" style="min-width:240px">
         <label>Plan Sheet ID (quantities + rates)</label>
         <input id="planSheetId" dir="ltr" value="1Qjtz8GJfppmk5HM2QHS322I27X9a9KdVxXlD7DiCyMI">
       </div>
-      <div class="field" style="width:170px">
+      <div class="field adm" style="width:170px">
         <label>Group pour by</label>
         <select id="groupBy">
           <option value="pe" selected>Station + Element (all days)</option>
@@ -412,11 +425,11 @@
         <label>To date</label>
         <input id="toDate" type="date">
       </div>
-      <div class="field" style="width:120px">
+      <div class="field adm" style="width:120px">
         <label>Refresh every (s)</label>
         <input id="interval" dir="ltr" type="number" min="5" value="10">
       </div>
-      <div class="field grow" style="min-width:260px">
+      <div class="field grow adm" style="min-width:260px">
         <label>Sync URL (shares Done / Required / Rate with every device)</label>
         <input id="syncUrl" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec" value="https://script.google.com/macros/s/AKfycbwUZl8iPyHWxo7cs6lAJDCIK4l0QECVYBfKtlY5bkvbKG_07wRUJOdSWs7jz496PYAXmg/exec">
       </div>
@@ -430,11 +443,16 @@
         <span class="chip" data-r="all">All</span>
       </div>
     </div>
-    <div class="cfg-note">
+    <div class="cfg-note adm">
       <span>⚠︎ For live pull to work, the sheet must be shared <b>Anyone with the link → Viewer</b>.</span>
       <a id="openSheet" href="#" target="_blank">Open sheet ↗</a>
       <button class="btn ghost" id="resetDone" title="Re-open the last pour you closed">↶ Undo last done</button>
       <button class="btn ghost" id="logoutBtn" title="Lock this device — password needed to open again">🔒 Logout</button>
+    </div>
+    <!-- Always visible: who you are, and the way in / out of admin mode -->
+    <div class="cfg-note" style="justify-content:space-between">
+      <span>👤 <b id="meName">—</b> <button class="btn ghost" id="changeName" style="padding:3px 9px;font-size:11.5px">تغيير الاسم</button></span>
+      <button class="btn ghost" id="adminBtn" title="Admin mode">🔑 Admin</button>
     </div>
   </div>
 
@@ -470,6 +488,21 @@
       <a class="btn" id="addRequestBtn" target="_blank" rel="noopener" href="#" title="Open the Plan sheet to add a new pour request" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">➕ ADD Request</a>
     </div>
     <div id="upcomingArea"></div>
+  </section>
+
+  <!-- ADMIN VIEW (only rendered for admin) -->
+  <section id="adminView">
+    <div class="card">
+      <h3>Who's viewing now</h3>
+      <div id="admWho"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <h3 style="margin:0">Edit log — who changed what</h3>
+        <button class="btn ghost" id="admRefresh">🔄 Refresh log</button>
+      </div>
+      <div id="admLog" style="margin-top:12px"></div>
+    </div>
   </section>
 
   <!-- FALLBACK -->
@@ -1028,7 +1061,8 @@ function rerender(){ render(build(LAST.matrix,LAST.header)); }
 function renderViewTabs(){
   const box=el('viewTabs'); if(!box)return;
   const mk=(id,label,cnt)=>`<div class="vtab ${view===id?'active':''}" data-v="${id}">${label}${cnt!=null?`<span class="cnt">${cnt}</span>`:''}</div>`;
-  box.innerHTML=mk('summary','Summary',null)+mk('pours','All Pours',VD.full.length)+mk('upcoming','Upcoming',VD.upcoming.length);
+  box.innerHTML=mk('summary','Summary',null)+mk('pours','All Pours',VD.full.length)+mk('upcoming','Upcoming',VD.upcoming.length)
+    +(IS_ADMIN?mk('admin','🔑 Admin',null):'');
   box.querySelectorAll('.vtab').forEach(t=>t.addEventListener('click',async()=>{
     view=t.dataset.v; await saveCfg(); renderViewTabs(); applyView();
   }));
@@ -1038,6 +1072,37 @@ function applyView(){
   show('summaryView', view==='summary');
   show('poursView', view==='pours');
   show('upcomingView', view==='upcoming');
+  show('adminView', view==='admin' && IS_ADMIN);
+  if(view==='admin' && IS_ADMIN){ renderAdminWho(); loadAdminLog(); }
+}
+
+/* ---------- admin panel: who's viewing + the edit log ---------- */
+const AGO=t=>{ const s=Math.max(0,Math.round((Date.now()-t)/1000));
+  return s<60?s+'s ago':(s<3600?Math.round(s/60)+'m ago':Math.round(s/3600)+'h ago'); };
+const LOGLAB={done:'Closed / re-opened a pour', req:'Changed Required', rate:'Changed Rate'};
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function renderAdminWho(){
+  const box=el('admWho'); if(!box)return;
+  box.innerHTML = WHO.length ? WHO.map(w=>`<div class="apy" style="grid-template-columns:1fr auto">
+      <div class="apy-el">${esc(w.name||'—')}</div>
+      <div class="apy-eta">${AGO(w.seen)}</div>
+    </div>`).join('')
+    : '<div class="muted" style="font-size:13px;padding:8px 4px">No one online right now.</div>';
+}
+async function loadAdminLog(){
+  const box=el('admLog'); if(!box)return;
+  box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px"><span class="spin"></span> Loading…</div>';
+  const r=await syncCall({action:'log', limit:100});
+  const rows=(r&&Array.isArray(r.log))?r.log:null;
+  if(!rows){ box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px">No log yet — re-deploy the Apps Script to start recording edits.</div>'; return; }
+  if(!rows.length){ box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px">No edits recorded yet.</div>'; return; }
+  box.innerHTML=`<div class="tbl-wrap"><table><thead><tr>
+      <th>When</th><th>Who</th><th>What</th><th>Pour</th><th>Value</th></tr></thead><tbody>
+    ${rows.map(x=>{ const t=typeof x.when==='number'?x.when:Date.parse(x.when);
+      return `<tr><td class="num">${isNaN(t)?esc(String(x.when)):new Date(t).toLocaleString()}</td>
+      <td><b>${esc(x.who||'—')}</b></td><td>${esc(LOGLAB[x.type]||x.type)}</td>
+      <td>${esc(x.key||'')}</td><td class="num">${esc(x.value||'')}</td></tr>`; }).join('')}
+  </tbody></table></div>`;
 }
 
 /* ---------- animated count-up for the KPI numbers ---------- */
@@ -1409,7 +1474,8 @@ function applyState(st){
 async function syncPull(){ const r=await syncCall({action:'get'}); return r ? applyState(r.state) : false; }
 // Push one change. The script returns the authoritative state, so re-render with it.
 async function syncPush(type,key,value){
-  const r=await syncCall({action:'set', type, key, value:(value==null?'':value)});
+  // `by` is what the admin's edit log records against this change
+  const r=await syncCall({action:'set', type, key, value:(value==null?'':value), by:ME});
   if(r&&r.state && applyState(r.state)) rerender();
   return r;
 }
@@ -1419,6 +1485,9 @@ async function syncPush(type,key,value){
    the sheet. Silently stays hidden when there's no Sync URL, or when the script hasn't been
    redeployed with the 'ping' action yet. */
 const KEY_DEV='pourdash:dev';
+const KEY_ME='pourdash:me';           // this device's display name
+let ME='';                            // shown in "who's viewing" and stamped on every edit
+let WHO=[];                           // roster from the last ping: [{name,seen}]
 function deviceId(){
   let d=''; try{ d=localStorage.getItem(KEY_DEV)||''; }catch(e){}
   if(!d){ d='d'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
@@ -1430,14 +1499,65 @@ function showOnline(n){
   if(!(n>0)){ b.hidden=true; return; }
   b.hidden=false;
   b.innerHTML=`<span class="dot"></span><b>${n}</b> ${n===1?'person':'people'} viewing`;
+  b.title = IS_ADMIN && WHO.length ? WHO.map(w=>w.name).join(', ') : '';
 }
 async function pingPresence(){
   if(!syncBase()){ const b=el('footOnline'); if(b)b.hidden=true; return; }
-  const r=await syncCall({action:'ping', who:deviceId()});
-  if(r && typeof r.online==='number') showOnline(r.online);
+  const r=await syncCall({action:'ping', who:deviceId(), name:ME});
+  if(r && typeof r.online==='number'){
+    WHO=Array.isArray(r.who)?r.who:[];
+    showOnline(r.online);
+    if(IS_ADMIN && view==='admin') renderAdminWho();
+  }
+}
+
+/* ---------- identity + admin mode ----------
+   Everyone types a name once (kept on the device); it rides along with every edit so the
+   admin log can answer "who changed this". Admin mode is a single password — its plaintext
+   is never in the code, only the SHA-256 hash, same trick as the access gate. */
+const ADMIN_HASH='cbfad02f9ed2a8d1e08d8f74f5303e9eb93637d47f82ab6f1c15871cf8dd0481';
+const KEY_ADMIN='pourdash:admin';
+let IS_ADMIN=false;
+
+function loadMe(){ try{ ME=localStorage.getItem(KEY_ME)||''; }catch(e){ ME=''; } return ME; }
+function askName(force){
+  return new Promise(resolve=>{
+    if(ME && !force) return resolve(ME);
+    const gate=el('nameGate'), inp=el('nameInp'), err=el('nameErr');
+    if(!gate) return resolve(ME||'');
+    gate.style.display='grid'; inp.value=force?ME:''; setTimeout(()=>inp.focus(),50);
+    el('nameForm').onsubmit=(ev)=>{
+      ev.preventDefault();
+      const v=inp.value.trim();
+      if(v.length<2){ err.textContent='اكتب اسمك من فضلك'; return; }
+      ME=v; try{ localStorage.setItem(KEY_ME,ME); }catch(e){}
+      err.textContent=''; gate.style.display='none';
+      const mn=el('meName'); if(mn)mn.textContent=ME;
+      pingPresence();
+      resolve(ME);
+    };
+  });
+}
+async function toggleAdmin(){
+  if(IS_ADMIN){                                   // already admin -> step back down
+    IS_ADMIN=false; try{ localStorage.removeItem(KEY_ADMIN); }catch(e){}
+    if(view==='admin') view='summary';
+    applyRole(); renderViewTabs(); applyView(); return;
+  }
+  const p=prompt('Admin password:'); if(!p) return;
+  const h=await sha256hex(p);
+  if(h!==ADMIN_HASH){ alert('كلمة السر غلط'); return; }
+  IS_ADMIN=true; try{ localStorage.setItem(KEY_ADMIN,ADMIN_HASH); }catch(e){}
+  applyRole(); renderViewTabs(); applyView();
+}
+// Show/hide every admin-only control. Done in JS (not CSS) so the original display value survives.
+function applyRole(){
+  document.querySelectorAll('.adm').forEach(e=>{ e.style.display = IS_ADMIN ? '' : 'none'; });
+  const b=el('adminBtn'); if(b){ b.textContent = IS_ADMIN?'🔓 Admin ON':'🔑 Admin'; b.classList.toggle('on',IS_ADMIN); }
+  const mn=el('meName'); if(mn)mn.textContent=ME||'—';
 }
 async function syncClear(type){
-  const r=await syncCall({action:'clear', type});
+  const r=await syncCall({action:'clear', type, by:ME});
   if(r&&r.state && applyState(r.state)) rerender();
   return r;
 }
@@ -1717,7 +1837,11 @@ function requireAuth(){
     el('groupBy').value='pe';
     el('fromDate').value=''; el('toDate').value='';
   }
-  if(['summary','pours','upcoming'].indexOf(view)<0)view='summary';
+  // restore identity + admin mode BEFORE the first render, so the right controls show from the start
+  loadMe();
+  try{ IS_ADMIN = localStorage.getItem(KEY_ADMIN)===ADMIN_HASH; }catch(e){ IS_ADMIN=false; }
+  if(['summary','pours','upcoming','admin'].indexOf(view)<0)view='summary';
+  if(view==='admin' && !IS_ADMIN) view='summary';
   document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.toggle('active',
     c.dataset.r==='all' && !el('fromDate').value && !el('toDate').value));
 
@@ -1742,9 +1866,15 @@ function requireAuth(){
   document.querySelectorAll('#quickRange .chip').forEach(c=>c.addEventListener('click',async()=>{
     setRange(c.dataset.r); await saveCfg(); rerender(); }));
 
+  { const ab=el('adminBtn'); if(ab) ab.addEventListener('click',toggleAdmin); }
+  { const cn=el('changeName'); if(cn) cn.addEventListener('click',()=>askName(true)); }
+  { const ar=el('admRefresh'); if(ar) ar.addEventListener('click',loadAdminLog); }
+
+  applyRole();
   applyView();
   loadLive(); reschedule();
   checkForUpdate(); setInterval(checkForUpdate,300000);   // self-update: on open, then every 5 min
+  askName(false);                                         // first run on this device -> ask who you are
   pingPresence(); setInterval(pingPresence,30000);        // "N people viewing" heartbeat
 })();
 // Register the service worker so the installed PWA opens offline (network-first — see sw.js).
