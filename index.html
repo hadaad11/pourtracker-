@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260722-211138">
+<meta name="app-build" content="20260723-115311">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1676,13 +1676,20 @@ async function loadLive(){
     if(parsed){ PLAN=parsed.plan; PLAN_ROWS=parsed.rows; stSet(KEY_PLAN,{plan:PLAN,rows:PLAN_ROWS});
       try{console.log('Live plan: '+PLAN_ROWS.length+' rows, '+Object.keys(PLAN).length+' unique codes');}catch(e){} }
     else { try{console.log('Plan sheet returned no parseable rows (check columns/sharing).');}catch(e){} }
-    // Link the plan's full date range to the program's filter (from oldest -> newest day in the plan),
-    // only when the range changes so manual picks stick. Covers all plan days -> nothing disappears.
+    // Default the date filter to TODAY when the plan covers today; otherwise fall back to the plan's
+    // full range (so an all-past/all-future plan still shows something instead of going blank).
+    // Only re-applied when the plan range changes, so the user's own date picks stick within a session.
     const prange=findPlanDateRange(planRes.matrix);
     if(prange){ const key=prange.min+'|'+prange.max;
-      if(key!==lastPlanRange){ lastPlanRange=key; el('fromDate').value=prange.min; el('toDate').value=prange.max;
-        CFG.fromDate=prange.min; CFG.toDate=prange.max; stSet(KEY_CFG,CFG);
-        document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.remove('active')); } }
+      if(key!==lastPlanRange){ lastPlanRange=key;
+        const today=todayStr(0);
+        const coversToday = prange.min<=today && today<=prange.max;
+        const f = coversToday ? today : prange.min;
+        const t = coversToday ? today : prange.max;
+        el('fromDate').value=f; el('toDate').value=t;
+        CFG.fromDate=f; CFG.toDate=t; stSet(KEY_CFG,CFG);
+        document.querySelectorAll('#quickRange .chip').forEach(c=>
+          c.classList.toggle('active', c.dataset.r==='today' && coversToday)); } }
   } else { try{console.log('Plan sheet not reachable — is it shared "Anyone with the link"?');}catch(e){} }
   let allRows=[]; const report=[]; let anyOk=false;
   REJECTED={}; REJECTED_TODAY=0;   // recomputed fresh each pull from every station tab's Follow Up column
@@ -1831,11 +1838,11 @@ function requireAuth(){
     if(savedCfg.groupBy)el('groupBy').value=savedCfg.groupBy;
     if(savedCfg.activeTab)activeTab=savedCfg.activeTab;
     if(savedCfg.view)view=savedCfg.view;
-    el('fromDate').value=savedCfg.fromDate||'';
-    el('toDate').value=savedCfg.toDate||'';
+    el('fromDate').value=savedCfg.fromDate||todayStr(0);
+    el('toDate').value=savedCfg.toDate||todayStr(0);
   } else {
     el('groupBy').value='pe';
-    el('fromDate').value=''; el('toDate').value='';
+    el('fromDate').value=todayStr(0); el('toDate').value=todayStr(0);   // default the filter to today
   }
   // restore identity + admin mode BEFORE the first render, so the right controls show from the start
   loadMe();
@@ -1843,7 +1850,7 @@ function requireAuth(){
   if(['summary','pours','upcoming','admin'].indexOf(view)<0)view='summary';
   if(view==='admin' && !IS_ADMIN) view='summary';
   document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.toggle('active',
-    c.dataset.r==='all' && !el('fromDate').value && !el('toDate').value));
+    c.dataset.r==='today' && el('fromDate').value===todayStr(0) && el('toDate').value===todayStr(0)));
 
   await saveCfg();
 
