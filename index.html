@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260723-115311">
+<meta name="app-build" content="20260802-174420">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -653,7 +653,10 @@ function elemKey(elem){ return (planKey(elem)||(String(elem||'').trim()||NOEL)).
 function rejKey(elem){ return (planKey(elem)||String(elem||'').trim().toUpperCase()); }
 // DONE is keyed per POUR INSTANCE = element label + that pour's date (not the bare code),
 // so marking one day's pour completed never hides a NEW plan entry that re-uses the same code.
-function doneKey(g){ return (g&&g.elem?String(g.elem):'') + '@@' + (g&&g.dk?String(g.dk):''); }
+// Close/Done key: keyed by the pour's UNIQUE ES id (falls back to the element label for non-ES data),
+// so two same-name pours (same code, same day, different ES) close independently. The date stays at
+// index [1] after '@@' so pruneDone() can still drop stale marks by their day.
+function doneKey(g){ const id=(g&&g.esId)?String(g.esId):(g&&g.elem?String(g.elem):''); return id + '@@' + (g&&g.dk?String(g.dk):''); }
 // Forget done-marks whose pour date fell out of the active plan window (keeps localStorage from
 // accumulating and guarantees a re-planned code shows again). "YYYY-MM-DD" compares as a string.
 function pruneDone(){
@@ -822,6 +825,7 @@ function buildPours(full, now){
   function subPour(row, agg, delivered, loads, label){
     const times=(loads||[]).map(l=>l.t).filter(t=>t!=null);
     const p={ key:'PP:'+(label||row.code), elem:(label||row.code), base:row.base, plant:agg?agg.plant:'',
+      esId:(row&&row.es)?String(row.es).trim():'',   // set BEFORE enrichGroup so doneKey uses the ES
       dk:agg?agg.dk:'', dObj:agg?agg.dObj:null, dates:agg?agg.dates:new Set(),
       delivered:delivered||0, trucks:(loads||[]).length, loads:loads||[],
       depMin:times.length?Math.min(...times):null, endMax:times.length?Math.max(...times):null,
