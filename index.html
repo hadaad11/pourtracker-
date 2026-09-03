@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260802-182050">
+<meta name="app-build" content="20260903-124600">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -585,6 +585,7 @@ function parsePlanTab(cols, matrix){
     sc:findCol(header,['sc','card','كارت']),
     pumps:findCol(header,['pump','مضخ','طلمب']),
     tem:findCol(header,['tem','temp','حرار']),
+    date:findCol(header,['date','تاريخ','day','يوم']),          // per-request date -> filters the Upcoming tab
     es:header.findIndex(h=>/^\s*es\s*$/i.test(String(h||''))),   // unique per-pour ID (matches the trucks' ES)
   };
   if(c.code<0||c.req<0) return null;
@@ -594,6 +595,7 @@ function parsePlanTab(cols, matrix){
     const code=String(row[c.code]||'').trim().toUpperCase().replace(/\s+/g,'');
     if(!code) continue;
     entries.push({ code, es: c.es>=0?String(row[c.es]||'').trim():'', req: num(row[c.req]), rate: c.rate>=0?num(row[c.rate]):0,
+      date: c.date>=0?normPlanDate(row[c.date]):'',
       mix: c.mix>=0?String(row[c.mix]||'').trim():'', client: c.client>=0?String(row[c.client]||'').trim():'',
       sc: c.sc>=0?String(row[c.sc]||'').trim():'', pumps: c.pumps>=0?String(row[c.pumps]||'').trim():'',
       tem: c.tem>=0?String(row[c.tem]||'').trim():'' });
@@ -619,7 +621,8 @@ function parsePlanPositional(cols, matrix){
   if(reqCol<0) return null;
   // rate column: prefer one whose values carry a per-hour unit; else last numeric col that isn't the date/elem/req
   const perHrS=score(v=>/\/\s*h|per\s*hr|m³\/h/i.test(String(v==null?'':v)));
-  const dateColS=score(v=>{const s=String(v==null?'':v).trim();return /^\d{4}-\d{1,2}-\d{1,2}$/.test(s)||/^\d{1,2}[-\/][A-Za-z]{3}/.test(s);});
+  const dateColS=score(v=>!!normPlanDate(v));
+  const dateCol=dateColS.some(x=>x>0)?dateColS.indexOf(Math.max(...dateColS)):-1;   // per-request date column
   let rateCol=-1;
   if(perHrS.some(x=>x>0)) rateCol=perHrS.indexOf(Math.max(...perHrS));
   else for(let i=ncols-1;i>=0;i--){ if(i!==elemCol&&i!==reqCol&&numS[i]>=2&&dateColS[i]<2){rateCol=i;break;} }
@@ -633,6 +636,7 @@ function parsePlanPositional(cols, matrix){
     const req=num(r[reqCol]);
     if(!(req>0))continue;
     entries.push({ code, req, rate: rateCol>=0?num(r[rateCol]):0, mix:'',
+      date: dateCol>=0?normPlanDate(r[dateCol]):'',
       client: clientCol>=0?String(r[clientCol]||'').trim():'', sc:'', pumps:'', tem:'' });
   }
   return aggregatePlanRows(entries);
@@ -684,21 +688,33 @@ function parseDate(s){
 }
 function dateKey(o){ return o? `${o.y}-${pad(o.mo)}-${pad(o.d)}` : ''; }
 const MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-// Collect ALL dates in the plan sheet ("13-Jul-2026" or "2026-07-13") -> {min,max} "YYYY-MM-DD"
+// Normalise one plan-sheet date cell ("13-Jul-2026" or "2026-07-13") -> "YYYY-MM-DD" (''=not a date)
+function normPlanDate(v){
+  const s=String(v==null?'':v).trim();
+  let m=s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[A-Za-z]*[-\s](\d{4})$/);   // 13-Jul-2026
+  if(m){ const mo=MONTHS[m[2].toLowerCase()]; if(mo) return `${m[3]}-${pad(mo)}-${pad(+m[1])}`; }
+  m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m) return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  return '';
+}
+// Collect ALL dates in the plan sheet -> {min,max} "YYYY-MM-DD"
 function findPlanDateRange(matrix){
   const dates=[];
-  for(let i=0;i<(matrix||[]).length;i++){
-    const row=matrix[i]||[];
-    for(let j=0;j<row.length;j++){
-      const v=String(row[j]==null?'':row[j]).trim();
-      let m=v.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[A-Za-z]*[-\s](\d{4})$/);   // 13-Jul-2026
-      if(m){ const mo=MONTHS[m[2].toLowerCase()]; if(mo){ dates.push(`${m[3]}-${pad(mo)}-${pad(+m[1])}`); continue; } }
-      m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m){ dates.push(`${m[1]}-${pad(+m[2])}-${pad(+m[3])}`); continue; }
-    }
-  }
+  for(const row of (matrix||[])) for(const cell of (row||[])){ const d=normPlanDate(cell); if(d) dates.push(d); }
   if(!dates.length) return null;
   dates.sort();
   return {min:dates[0], max:dates[dates.length-1]};
+}
+// Is a plan request's date inside the current From/To filter?
+//  - No filter at all ("All") -> show every request, dated or not.
+//  - A filter IS active -> show ONLY requests whose own date falls in range; an undated request
+//    is not "dated today", so it is hidden until the user writes a date on it in the plan sheet.
+function inDateFilter(d){
+  const from=CFG.fromDate||'', to=CFG.toDate||'';
+  if(!from && !to) return true;
+  if(!d) return false;
+  if(from && d<from) return false;
+  if(to && d>to) return false;
+  return true;
 }
 function parseTime(s){
   s=String(s||'').trim(); if(!s)return null;
@@ -826,6 +842,7 @@ function buildPours(full, now){
     const times=(loads||[]).map(l=>l.t).filter(t=>t!=null);
     const p={ key:'PP:'+(label||row.code), elem:(label||row.code), base:row.base, plant:agg?agg.plant:'',
       esId:(row&&row.es)?String(row.es).trim():'',   // set BEFORE enrichGroup so doneKey uses the ES
+      planDate:(row&&row.date)?row.date:'',           // the request's own date (for the Upcoming date filter)
       dk:agg?agg.dk:'', dObj:agg?agg.dObj:null, dates:agg?agg.dates:new Set(),
       delivered:delivered||0, trucks:(loads||[]).length, loads:loads||[],
       depMin:times.length?Math.min(...times):null, endMax:times.length?Math.max(...times):null,
@@ -1046,8 +1063,9 @@ function render(res){
   const open=started.filter(g=>g.status==='active'||g.status==='none');       // running now
   const completed=started.filter(g=>g.status==='done'||g.status==='over');
   const closed=started.filter(g=>g.status==='closed');                        // auto-closed (2h idle)
-  // Upcoming = planned pours not started yet (0 trucks, has a target), excluding DONE
-  const upcoming=withElem.filter(g=>g.trucks===0 && g.planReq!=null);
+  // Upcoming = planned pours not started yet (0 trucks, has a target), excluding DONE,
+  // and only those whose request date falls inside the current From/To date filter.
+  const upcoming=withElem.filter(g=>g.trucks===0 && g.planReq!=null && inDateFilter(g.planDate));
   // Closed Pours = the ones the user marked DONE (shown read-only below, with what they poured)
   const doneList=summary.filter(g=>hasElem(g) && g.trucks>0 && DONE[doneKey(g)]);
   VD={full,summary,started,open,completed,closed,upcoming,doneList};
