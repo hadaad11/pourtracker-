@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20260903-124600">
+<meta name="app-build" content="20261008-042451">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -289,6 +289,16 @@
   .online .dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none;
     box-shadow:0 0 0 0 rgba(34,197,94,.55);animation:onp 2s ease-out infinite}
   @keyframes onp{70%{box-shadow:0 0 0 7px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+  /* truck tracking view */
+  .trk-counts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .trk-kpi{background:var(--glass,rgba(24,30,50,.5));border:1px solid var(--line2);border-radius:14px;padding:12px 10px;text-align:center}
+  .trk-kpi .n{font-family:var(--mono);font-size:26px;font-weight:800;line-height:1}
+  .trk-kpi .l{font-size:11px;color:var(--muted);margin-top:5px;text-transform:uppercase;letter-spacing:.5px}
+  .trk-grid{display:flex;flex-wrap:wrap;gap:8px}
+  .trk-chip{font-family:var(--mono);font-weight:800;font-size:15px;min-width:46px;text-align:center;
+    padding:9px 12px;border-radius:11px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:var(--green)}
+  .trk-chip.down{background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.4);color:var(--rose);cursor:help}
+  @media(max-width:560px){ .trk-counts{grid-template-columns:repeat(2,1fr)} }
   .spin{width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;
     display:inline-block;animation:sp .7s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -488,6 +498,12 @@
       <a class="btn" id="addRequestBtn" target="_blank" rel="noopener" href="#" title="Open the Plan sheet to add a new pour request" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">➕ ADD Request</a>
     </div>
     <div id="upcomingArea"></div>
+  </section>
+
+  <!-- TRUCK TRACKING VIEW -->
+  <section id="trucksView">
+    <div class="section-title">Truck Tracking</div>
+    <div id="trucksArea"></div>
   </section>
 
   <!-- ADMIN VIEW (only rendered for admin) -->
@@ -1084,6 +1100,7 @@ function renderViewTabs(){
   const box=el('viewTabs'); if(!box)return;
   const mk=(id,label,cnt)=>`<div class="vtab ${view===id?'active':''}" data-v="${id}">${label}${cnt!=null?`<span class="cnt">${cnt}</span>`:''}</div>`;
   box.innerHTML=mk('summary','Summary',null)+mk('pours','All Pours',VD.full.length)+mk('upcoming','Upcoming',VD.upcoming.length)
+    +mk('trucks','🚛 Trucks', (TRUCKS&&TRUCKS.ok)?(TRUCKS.loaded.length+TRUCKS.available.length):null)
     +(IS_ADMIN?mk('admin','🔑 Admin',null):'');
   box.querySelectorAll('.vtab').forEach(t=>t.addEventListener('click',async()=>{
     view=t.dataset.v; await saveCfg(); renderViewTabs(); applyView();
@@ -1094,8 +1111,47 @@ function applyView(){
   show('summaryView', view==='summary');
   show('poursView', view==='pours');
   show('upcomingView', view==='upcoming');
+  show('trucksView', view==='trucks');
   show('adminView', view==='admin' && IS_ADMIN);
+  if(view==='trucks') renderTrucks();
   if(view==='admin' && IS_ADMIN){ renderAdminWho(); loadAdminLog(); }
+}
+
+/* ---------- truck tracking view (Loaded / Empty sub-tabs) ---------- */
+let truckTab='loaded';   // 'loaded' | 'empty'
+function renderTrucks(){
+  const area=el('trucksArea'); if(!area)return;
+  const t=TRUCKS;
+  if(!t||!t.ok){ area.innerHTML='<div class="muted" style="font-size:13px;padding:10px 2px">Truck tracking data not available yet — pull the sheet.</div>'; return; }
+  const esMap={}; (PLAN_ROWS||[]).forEach(r=>{ if(r.es) esMap[String(r.es).trim()]=r.code; });
+  const site=es=>{ es=String(es||'').trim(); return es?(esMap[es]||es):'—'; };
+  const counts=`<div class="trk-counts">
+     <div class="trk-kpi"><div class="n">${t.working.length}</div><div class="l">Working</div></div>
+     <div class="trk-kpi"><div class="n" style="color:var(--cyan)">${t.loaded.length}</div><div class="l">Loaded</div></div>
+     <div class="trk-kpi"><div class="n" style="color:var(--green)">${t.available.length}</div><div class="l">Empty</div></div>
+     <div class="trk-kpi"><div class="n" style="color:var(--rose)">${t.breakdown.length}</div><div class="l">Breakdown</div></div>
+   </div>`;
+  const tabs=`<div class="spot-tabs" style="margin:14px 0 10px">
+     <span class="spot-tab ${truckTab==='loaded'?'active':''}" data-tt="loaded">Loaded · محمّلة (${t.loaded.length})</span>
+     <span class="spot-tab ${truckTab==='empty'?'active':''}" data-tt="empty">Empty · فاضية (${t.available.length})</span>
+   </div>`;
+  let body;
+  if(truckTab==='loaded'){
+    body = t.loaded.length ? `<div class="tbl-wrap"><table><thead><tr>
+        <th>Truck</th><th>Plant</th><th>Site / Pour</th><th>m³</th><th>Departure</th><th>Elapsed</th></tr></thead><tbody>
+        ${t.loaded.map(x=>`<tr><td><b>${esc(x.truck)}</b></td><td>${esc(x.plant)||'—'}</td><td>${esc(site(x.es))}</td>
+          <td class="num">${x.q?fmt(x.q,0):'—'}</td><td class="num">${esc(x.dep)||'—'}</td><td class="num">${esc(x.elapsed)||'—'}</td></tr>`).join('')}
+        </tbody></table></div>`
+      : '<div class="muted" style="font-size:13px;padding:10px 2px">No loaded trucks out right now.</div>';
+  } else {
+    body = t.available.length
+      ? `<div class="trk-grid">${t.available.map(n=>`<span class="trk-chip">${esc(n)}</span>`).join('')}</div>`
+      : '<div class="muted" style="font-size:13px;padding:10px 2px">No empty trucks at the plant right now.</div>';
+    if(t.breakdown.length) body += `<div style="margin-top:18px"><div class="section-title" style="font-size:13px;margin-bottom:8px">Breakdown · معطّلة (${t.breakdown.length})</div>
+       <div class="trk-grid">${t.breakdown.map(b=>`<span class="trk-chip down" title="${esc(b.note)}">${esc(b.truck)}</span>`).join('')}</div></div>`;
+  }
+  area.innerHTML=counts+tabs+body;
+  area.querySelectorAll('.spot-tab').forEach(s=>s.addEventListener('click',()=>{ truckTab=s.dataset.tt; renderTrucks(); }));
 }
 
 /* ---------- admin panel: who's viewing + the edit log ---------- */
@@ -1680,6 +1736,53 @@ async function loadProduction(){
   }catch(e){}
 }
 
+/* ---------- live truck tracking ----------------------------------------------
+   The "Trucks Tracking" tab (same gid as production, 1257690697) is formula-driven, so gviz returns it
+   blank — but /export?format=csv DOES return the computed values. We parse three things out of it:
+     • the per-truck list of trucks currently OUT with concrete  (= LOADED / on site)
+     • the status list  truck# | TRUE/FALSE | note  (TRUE = working, FALSE = broken down)
+     • EMPTY trucks = working trucks that are NOT in the loaded list (i.e. back at the plant). */
+const TRUCKS_GID='1257690697';
+let TRUCKS={loaded:[],available:[],breakdown:[],working:[],ok:false};
+async function loadTrucks(){
+  try{
+    const id=el('sheetId').value.trim(); if(!id) return;
+    const r=await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${TRUCKS_GID}&_=${Date.now()}`,{cache:'no-store'});
+    if(!r.ok) return;
+    const rows=(await r.text()).split(/\r?\n/).map(parseCsvLine);
+    // 1) per-truck LOADED list — find its header row (has "Truck Mixer" + "Departure")
+    let hr=-1;
+    for(let i=0;i<Math.min(rows.length,18);i++){ const L=rows[i].map(x=>String(x||'').toLowerCase());
+      if(L.some(x=>/truck\s*mixer/.test(x)) && L.some(x=>/departure/.test(x))){ hr=i; break; } }
+    const loaded=[];
+    if(hr>=0){
+      const H=rows[hr].map(x=>String(x||'').trim().toLowerCase());
+      const ci=re=>H.findIndex(x=>re.test(x));
+      const cT=ci(/truck\s*mixer/), cP=ci(/plant/), cE=ci(/^es$/), cQ=ci(/qm3|concrete/),
+            cD=ci(/departure/), cEl=ci(/elapsed/), cA=ci(/action/);
+      for(let i=hr+1;i<rows.length;i++){ const row=rows[i]; const tk=String(row[cT]==null?'':row[cT]).trim();
+        if(!tk) break;                                   // the list ends at the first blank truck cell
+        loaded.push({truck:tk, plant:cP>=0?String(row[cP]||'').trim():'', es:cE>=0?String(row[cE]||'').trim():'',
+          q:cQ>=0?num(row[cQ]):0, dep:cD>=0?String(row[cD]||'').trim():'', elapsed:cEl>=0?String(row[cEl]||'').trim():'',
+          action:cA>=0?String(row[cA]||'').trim():''});
+      }
+    }
+    // 2) status list: a TRUE/FALSE cell with a truck number immediately to its left
+    const working=[], broken=[];
+    for(const row of rows){ for(let j=1;j<row.length;j++){
+      const v=String(row[j]||'').trim().toUpperCase(), left=String(row[j-1]||'').trim();
+      if((v==='TRUE'||v==='FALSE') && /^\d{2,4}$/.test(left)){
+        if(v==='TRUE') working.push(left);
+        else broken.push({truck:left, note:String(row[j+1]||'').trim()});
+      }
+    } }
+    // 3) EMPTY = working trucks not currently loaded/out
+    const out=new Set(loaded.map(x=>x.truck));
+    const available=working.filter(t=>!out.has(t));
+    TRUCKS={loaded, available, breakdown:broken, working, ok:true};
+  }catch(e){}
+}
+
 async function loadLive(){
   const id=el('sheetId').value.trim();
   const tabs=el('tabs').value.split(',').map(t=>t.trim()).filter(Boolean);
@@ -1691,27 +1794,16 @@ async function loadLive(){
     Promise.all(tabs.map(t=>fetchTab(id,t))),
     fetchTab(planSid, ''),
     syncPull(),         // shared Done/Required/Rate from the sheet (no-op when Sync URL is empty)
-    loadProduction()    // MTD / today straight from the sheet's own daily production table
+    loadProduction(),   // MTD / today straight from the sheet's own daily production table
+    loadTrucks()        // live truck tracking (loaded / empty) from the "Trucks Tracking" tab
   ]);
   if(planRes && planRes.ok){
     const parsed=parsePlanTab(planRes.cols, planRes.matrix) || parsePlanPositional(planRes.cols, planRes.matrix);
     if(parsed){ PLAN=parsed.plan; PLAN_ROWS=parsed.rows; stSet(KEY_PLAN,{plan:PLAN,rows:PLAN_ROWS});
       try{console.log('Live plan: '+PLAN_ROWS.length+' rows, '+Object.keys(PLAN).length+' unique codes');}catch(e){} }
     else { try{console.log('Plan sheet returned no parseable rows (check columns/sharing).');}catch(e){} }
-    // Default the date filter to TODAY when the plan covers today; otherwise fall back to the plan's
-    // full range (so an all-past/all-future plan still shows something instead of going blank).
-    // Only re-applied when the plan range changes, so the user's own date picks stick within a session.
-    const prange=findPlanDateRange(planRes.matrix);
-    if(prange){ const key=prange.min+'|'+prange.max;
-      if(key!==lastPlanRange){ lastPlanRange=key;
-        const today=todayStr(0);
-        const coversToday = prange.min<=today && today<=prange.max;
-        const f = coversToday ? today : prange.min;
-        const t = coversToday ? today : prange.max;
-        el('fromDate').value=f; el('toDate').value=t;
-        CFG.fromDate=f; CFG.toDate=t; stSet(KEY_CFG,CFG);
-        document.querySelectorAll('#quickRange .chip').forEach(c=>
-          c.classList.toggle('active', c.dataset.r==='today' && coversToday)); } }
+    // The date filter always opens on TODAY (set in init) and the plan no longer drags it around —
+    // so re-opening the app never forces the user to re-pick "Today". They change the date manually if needed.
   } else { try{console.log('Plan sheet not reachable — is it shared "Anyone with the link"?');}catch(e){} }
   let allRows=[]; const report=[]; let anyOk=false;
   REJECTED={}; REJECTED_TODAY=0;   // recomputed fresh each pull from every station tab's Follow Up column
@@ -1860,8 +1952,8 @@ function requireAuth(){
     if(savedCfg.groupBy)el('groupBy').value=savedCfg.groupBy;
     if(savedCfg.activeTab)activeTab=savedCfg.activeTab;
     if(savedCfg.view)view=savedCfg.view;
-    el('fromDate').value=savedCfg.fromDate||todayStr(0);
-    el('toDate').value=savedCfg.toDate||todayStr(0);
+    el('fromDate').value=todayStr(0);   // ALWAYS open on today (ignore the saved date); user changes it manually
+    el('toDate').value=todayStr(0);
   } else {
     el('groupBy').value='pe';
     el('fromDate').value=todayStr(0); el('toDate').value=todayStr(0);   // default the filter to today
@@ -1869,7 +1961,7 @@ function requireAuth(){
   // restore identity + admin mode BEFORE the first render, so the right controls show from the start
   loadMe();
   try{ IS_ADMIN = localStorage.getItem(KEY_ADMIN)===ADMIN_HASH; }catch(e){ IS_ADMIN=false; }
-  if(['summary','pours','upcoming','admin'].indexOf(view)<0)view='summary';
+  if(['summary','pours','upcoming','trucks','admin'].indexOf(view)<0)view='summary';
   if(view==='admin' && !IS_ADMIN) view='summary';
   document.querySelectorAll('#quickRange .chip').forEach(c=>c.classList.toggle('active',
     c.dataset.r==='today' && el('fromDate').value===todayStr(0) && el('toDate').value===todayStr(0)));
