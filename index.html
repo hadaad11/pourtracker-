@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20261008-042451">
+<meta name="app-build" content="20261008-043539">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -298,6 +298,16 @@
   .trk-chip{font-family:var(--mono);font-weight:800;font-size:15px;min-width:46px;text-align:center;
     padding:9px 12px;border-radius:11px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:var(--green)}
   .trk-chip.down{background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.4);color:var(--rose);cursor:help}
+  .trk-cards{display:grid;grid-template-columns:1fr;gap:8px}
+  .trk-card{display:flex;align-items:center;gap:12px;background:var(--glass,rgba(24,30,50,.5));
+    border:1px solid var(--line2);border-radius:13px;padding:10px 13px}
+  .tc-truck{font-family:var(--mono);font-size:22px;font-weight:800;min-width:48px;text-align:center;color:var(--cyan);flex:none}
+  .tc-info{min-width:0;flex:1}
+  .tc-top{font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tc-dim{color:var(--muted);font-weight:500;font-size:13px}
+  .tc-meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px}
+  .tc-flag{color:var(--amber);font-family:var(--sans);font-weight:700}
+  @media(min-width:620px){ .trk-cards{grid-template-columns:1fr 1fr} }
   @media(max-width:560px){ .trk-counts{grid-template-columns:repeat(2,1fr)} }
   .spin{width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;
     display:inline-block;animation:sp .7s linear infinite;vertical-align:-2px}
@@ -1137,11 +1147,15 @@ function renderTrucks(){
    </div>`;
   let body;
   if(truckTab==='loaded'){
-    body = t.loaded.length ? `<div class="tbl-wrap"><table><thead><tr>
-        <th>Truck</th><th>Plant</th><th>Site / Pour</th><th>m³</th><th>Departure</th><th>Elapsed</th></tr></thead><tbody>
-        ${t.loaded.map(x=>`<tr><td><b>${esc(x.truck)}</b></td><td>${esc(x.plant)||'—'}</td><td>${esc(site(x.es))}</td>
-          <td class="num">${x.q?fmt(x.q,0):'—'}</td><td class="num">${esc(x.dep)||'—'}</td><td class="num">${esc(x.elapsed)||'—'}</td></tr>`).join('')}
-        </tbody></table></div>`
+    // card layout (not a wide table) so it reads cleanly on a phone without horizontal scroll
+    body = t.loaded.length ? `<div class="trk-cards">${t.loaded.map(x=>`
+        <div class="trk-card">
+          <div class="tc-truck">${esc(x.truck)}</div>
+          <div class="tc-info">
+            <div class="tc-top">${esc(site(x.es))}${x.plant?` <span class="tc-dim">· ${esc(x.plant)}</span>`:''}</div>
+            <div class="tc-meta">${x.q?fmt(x.q,0)+' m³':''}${x.elapsed?` · out ${esc(x.elapsed)}`:''}${x.dep?` · ${esc(x.dep)}`:''}${x.action?` <span class="tc-flag">⚠ ${esc(x.action)}</span>`:''}</div>
+          </div>
+        </div>`).join('')}</div>`
       : '<div class="muted" style="font-size:13px;padding:10px 2px">No loaded trucks out right now.</div>';
   } else {
     body = t.available.length
