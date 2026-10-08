@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20261008-092619">
+<meta name="app-build" content="20261008-093411">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1667,7 +1667,7 @@ function showOnline(n){
 async function pingPresence(){
   if(BLOCKED) return;
   if(!syncBase()){ const b=el('footOnline'); if(b)b.hidden=true; return; }
-  const r=await syncCall({action:'ping', who:deviceId(), name:ME, ip:MY_IP});
+  const r=await syncCall({action:'ping', who:deviceId(), name:ME, ip:MY_IP, admin:IS_ADMIN?1:0});
   if(r && typeof r.online==='number'){
     WHO=Array.isArray(r.who)?r.who:[];
     showOnline(r.online);
@@ -1679,7 +1679,7 @@ async function pingPresence(){
    Everyone types a name once (kept on the device); it rides along with every edit so the
    admin log can answer "who changed this". Admin mode is a single password — its plaintext
    is never in the code, only the SHA-256 hash, same trick as the access gate. */
-const ADMIN_HASH='ed9d0fce1e4dc986fe5e7762ce4d5979103a9707bac251265f3f12467fde2ecb';
+const ADMIN_HASH='28995a2c0d04b66d5c7c818536bb00cd1fc1ac422aea47627de0999782fee3f4';
 const KEY_ADMIN='pourdash:admin';
 let IS_ADMIN=false;
 
@@ -1704,14 +1704,18 @@ function askName(force){
   });
 }
 async function toggleAdmin(){
-  if(IS_ADMIN){                                   // already admin -> step back down
+  if(IS_ADMIN){                                   // step down -> free the single admin seat
     IS_ADMIN=false; try{ localStorage.removeItem(KEY_ADMIN); }catch(e){}
+    syncCall({action:'adminrelease', who:deviceId()});
     if(view==='admin') view='summary';
     applyRole(); renderViewTabs(); applyView(); return;
   }
   const p=prompt('Admin password:'); if(!p) return;
   const h=await sha256hex(p);
   if(h!==ADMIN_HASH){ alert('كلمة السر غلط'); return; }
+  // only ONE admin at a time — try to claim the seat on the server
+  const claim=await syncCall({action:'adminclaim', who:deviceId(), name:ME});
+  if(claim && claim.held){ alert('يوزر الأدمن مفتوح حاليًا'+(claim.by?(' على جهاز: '+claim.by):'')+'.\nلازم يتقفل الأول قبل ما حد تاني يفتحه.'); return; }
   IS_ADMIN=true; try{ localStorage.setItem(KEY_ADMIN,ADMIN_HASH); }catch(e){}
   applyRole(); renderViewTabs(); applyView();
 }
@@ -2088,6 +2092,11 @@ function requireAuth(){
   const wi = await whoamiCheck();
   if(wi && wi.blocked) return;                            // blocked IP -> locked out, stop init here
   if(!ME && wi && wi.name){ ME=wi.name; try{localStorage.setItem(KEY_ME,ME);}catch(e){} const mn=el('meName'); if(mn)mn.textContent=ME; }
+  if(IS_ADMIN){                                           // restored admin -> re-claim the single seat
+    const claim=await syncCall({action:'adminclaim', who:deviceId(), name:ME});
+    if(claim && claim.held){ IS_ADMIN=false; try{localStorage.removeItem(KEY_ADMIN);}catch(e){}
+      if(view==='admin') view='summary'; applyRole(); renderViewTabs(); applyView(); }
+  }
   askName(false);                                         // only prompts if we still have no name
   setInterval(whoamiCheck, 300000);                       // re-check block status every 5 min
   pingPresence(); setInterval(pingPresence,30000);        // "N people viewing" heartbeat
