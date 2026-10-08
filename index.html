@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20261008-043539">
+<meta name="app-build" content="20261008-092619">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -521,6 +521,13 @@
     <div class="card">
       <h3>Who's viewing now</h3>
       <div id="admWho"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <h3 style="margin:0">Users &amp; access — block by IP</h3>
+        <button class="btn ghost" id="admUsersRefresh">🔄 Refresh</button>
+      </div>
+      <div id="admUsers" style="margin-top:12px"></div>
     </div>
     <div class="card" style="margin-top:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -1124,7 +1131,7 @@ function applyView(){
   show('trucksView', view==='trucks');
   show('adminView', view==='admin' && IS_ADMIN);
   if(view==='trucks') renderTrucks();
-  if(view==='admin' && IS_ADMIN){ renderAdminWho(); loadAdminLog(); }
+  if(view==='admin' && IS_ADMIN){ renderAdminWho(); loadAdminUsers(); loadAdminLog(); }
 }
 
 /* ---------- truck tracking view (Loaded / Empty sub-tabs) ---------- */
@@ -1176,10 +1183,43 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 function renderAdminWho(){
   const box=el('admWho'); if(!box)return;
   box.innerHTML = WHO.length ? WHO.map(w=>`<div class="apy" style="grid-template-columns:1fr auto">
-      <div class="apy-el">${esc(w.name||'—')}</div>
+      <div class="apy-el">${esc(w.name||'—')}${w.ip?` <span class="p">${esc(w.ip)}</span>`:''}</div>
       <div class="apy-eta">${AGO(w.seen)}</div>
     </div>`).join('')
     : '<div class="muted" style="font-size:13px;padding:8px 4px">No one online right now.</div>';
+}
+/* ---------- admin: users & access (remember-by-IP + block) ---------- */
+let USERS=[];
+async function loadAdminUsers(){
+  const box=el('admUsers'); if(!box)return;
+  box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px"><span class="spin"></span> Loading…</div>';
+  const r=await syncCall({action:'users'});
+  const rows=(r&&Array.isArray(r.users))?r.users:null;
+  if(!rows){ box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px">No user list yet — re-deploy the Apps Script to enable it.</div>'; return; }
+  USERS=rows; renderAdminUsers();
+}
+function renderAdminUsers(){
+  const box=el('admUsers'); if(!box)return;
+  if(!USERS.length){ box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 4px">No visitors recorded yet.</div>'; return; }
+  box.innerHTML=`<div class="tbl-wrap"><table><thead><tr>
+      <th>Name</th><th>IP</th><th>Last seen</th><th>Status</th><th></th></tr></thead><tbody>
+    ${USERS.map(u=>{ const t=typeof u.lastSeen==='number'?u.lastSeen:Date.parse(u.lastSeen);
+      return `<tr>
+        <td><b>${esc(u.name||'—')}</b></td>
+        <td class="num">${esc(u.ip)}</td>
+        <td class="num">${isNaN(t)?'—':new Date(t).toLocaleString()}</td>
+        <td>${u.blocked?'<b style="color:var(--rose)">Blocked</b>':'<span style="color:var(--green)">Allowed</span>'}</td>
+        <td style="text-align:right"><button class="btn ghost usr-blk" data-ip="${esc(u.ip)}" data-blocked="${u.blocked?1:0}"
+          style="${u.blocked?'':'color:var(--rose);border-color:rgba(244,63,94,.4)'};padding:4px 11px;font-size:12px">${u.blocked?'Unblock':'Block'}</button></td>
+      </tr>`; }).join('')}
+  </tbody></table></div>`;
+  box.querySelectorAll('.usr-blk').forEach(b=>b.addEventListener('click',async()=>{
+    const ip=b.dataset.ip, isBlocked=b.dataset.blocked==='1'; if(!ip)return;
+    if(!isBlocked && !confirm('Block '+ip+'؟\nالجهاز ده مش هيقدر يفتح البرنامج.'))return;
+    b.disabled=true; b.textContent='…';
+    await syncCall({action:isBlocked?'unblock':'block', ip, by:ME});
+    loadAdminUsers();
+  }));
 }
 async function loadAdminLog(){
   const box=el('admLog'); if(!box)return;
@@ -1579,7 +1619,38 @@ async function syncPush(type,key,value){
 const KEY_DEV='pourdash:dev';
 const KEY_ME='pourdash:me';           // this device's display name
 let ME='';                            // shown in "who's viewing" and stamped on every edit
-let WHO=[];                           // roster from the last ping: [{name,seen}]
+let WHO=[];                           // roster from the last ping: [{name,seen,ip}]
+let MY_IP='';                         // this client's public IP (Apps Script can't see it, so we look it up)
+let BLOCKED=false;
+// Look up the public IP once from a public echo service, then send it along so the server can remember
+// the name by IP and the admin can block it. Best-effort: if it fails, everything else still works.
+async function getClientIP(){
+  if(MY_IP) return MY_IP;
+  for(const u of ['https://api.ipify.org?format=json','https://api64.ipify.org?format=json']){
+    try{ const r=await fetch(u,{cache:'no-store'}); if(r.ok){ const j=await r.json(); if(j&&j.ip){ MY_IP=String(j.ip).trim(); break; } } }catch(e){}
+  }
+  return MY_IP;
+}
+// Full-screen lock shown to a blocked IP.
+function showBlocked(){
+  BLOCKED=true;
+  let o=el('blockGate');
+  if(!o){ o=document.createElement('div'); o.id='blockGate';
+    o.style.cssText='position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:rgba(8,11,22,.95);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);text-align:center;padding:24px';
+    o.innerHTML='<div style="max-width:360px"><div style="font-size:48px">🚫</div><div style="font-weight:800;font-size:20px;margin:12px 0 6px">تم حظر الوصول</div><div style="color:#8b97a6;font-size:13.5px">الجهاز ده ممنوع من فتح البرنامج. كلّم مدير النظام.</div></div>';
+    document.body.appendChild(o);
+  }
+  o.style.display='grid';
+  try{ if(timer)clearInterval(timer); if(countdown)clearInterval(countdown); }catch(e){}
+}
+// Ask the server (by IP): my remembered name + am I blocked. Returns {name,blocked} or null.
+async function whoamiCheck(){
+  if(!syncBase() || !MY_IP) return null;
+  const r=await syncCall({action:'whoami', ip:MY_IP});
+  if(!r) return null;
+  if(r.blocked){ showBlocked(); return {blocked:true}; }
+  return {name:r.name||'', blocked:false};
+}
 function deviceId(){
   let d=''; try{ d=localStorage.getItem(KEY_DEV)||''; }catch(e){}
   if(!d){ d='d'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
@@ -1594,8 +1665,9 @@ function showOnline(n){
   b.title = IS_ADMIN && WHO.length ? WHO.map(w=>w.name).join(', ') : '';
 }
 async function pingPresence(){
+  if(BLOCKED) return;
   if(!syncBase()){ const b=el('footOnline'); if(b)b.hidden=true; return; }
-  const r=await syncCall({action:'ping', who:deviceId(), name:ME});
+  const r=await syncCall({action:'ping', who:deviceId(), name:ME, ip:MY_IP});
   if(r && typeof r.online==='number'){
     WHO=Array.isArray(r.who)?r.who:[];
     showOnline(r.online);
@@ -1625,6 +1697,7 @@ function askName(force){
       ME=v; try{ localStorage.setItem(KEY_ME,ME); }catch(e){}
       err.textContent=''; gate.style.display='none';
       const mn=el('meName'); if(mn)mn.textContent=ME;
+      if(MY_IP) syncCall({action:'register', ip:MY_IP, name:ME});   // remember this name against the IP
       pingPresence();
       resolve(ME);
     };
@@ -2004,12 +2077,19 @@ function requireAuth(){
   { const ab=el('adminBtn'); if(ab) ab.addEventListener('click',toggleAdmin); }
   { const cn=el('changeName'); if(cn) cn.addEventListener('click',()=>askName(true)); }
   { const ar=el('admRefresh'); if(ar) ar.addEventListener('click',loadAdminLog); }
+  { const au=el('admUsersRefresh'); if(au) au.addEventListener('click',loadAdminUsers); }
 
   applyRole();
   applyView();
   loadLive(); reschedule();
   checkForUpdate(); setInterval(checkForUpdate,300000);   // self-update: on open, then every 5 min
-  askName(false);                                         // first run on this device -> ask who you are
+  // Identity: get our IP, then ask the server for our remembered name / blocked status before prompting.
+  await getClientIP();
+  const wi = await whoamiCheck();
+  if(wi && wi.blocked) return;                            // blocked IP -> locked out, stop init here
+  if(!ME && wi && wi.name){ ME=wi.name; try{localStorage.setItem(KEY_ME,ME);}catch(e){} const mn=el('meName'); if(mn)mn.textContent=ME; }
+  askName(false);                                         // only prompts if we still have no name
+  setInterval(whoamiCheck, 300000);                       // re-check block status every 5 min
   pingPresence(); setInterval(pingPresence,30000);        // "N people viewing" heartbeat
 })();
 // Register the service worker so the installed PWA opens offline (network-first — see sw.js).
