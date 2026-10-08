@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20261008-094538">
+<meta name="app-build" content="20261008-155735">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -1206,19 +1206,19 @@ function renderAdminUsers(){
       <th>Name</th><th>IP</th><th>Last seen</th><th>Status</th><th></th></tr></thead><tbody>
     ${USERS.map(u=>{ const t=typeof u.lastSeen==='number'?u.lastSeen:Date.parse(u.lastSeen);
       return `<tr>
-        <td><b>${esc(u.name||'—')}</b></td>
+        <td><b>${esc(u.name||'—')}</b>${u.dev===deviceId()?' <span style="color:var(--muted);font-size:11px">(أنت)</span>':''}</td>
         <td class="num">${esc(u.ip)}</td>
         <td class="num">${isNaN(t)?'—':new Date(t).toLocaleString()}</td>
         <td>${u.blocked?'<b style="color:var(--rose)">Blocked</b>':'<span style="color:var(--green)">Allowed</span>'}</td>
-        <td style="text-align:right"><button class="btn ghost usr-blk" data-ip="${esc(u.ip)}" data-blocked="${u.blocked?1:0}"
+        <td style="text-align:right"><button class="btn ghost usr-blk" data-dev="${esc(u.dev)}" data-name="${esc(u.name||u.dev)}" data-blocked="${u.blocked?1:0}"
           style="${u.blocked?'':'color:var(--rose);border-color:rgba(244,63,94,.4)'};padding:4px 11px;font-size:12px">${u.blocked?'Unblock':'Block'}</button></td>
       </tr>`; }).join('')}
   </tbody></table></div>`;
   box.querySelectorAll('.usr-blk').forEach(b=>b.addEventListener('click',async()=>{
-    const ip=b.dataset.ip, isBlocked=b.dataset.blocked==='1'; if(!ip)return;
-    if(!isBlocked && !confirm('Block '+ip+'؟\nالجهاز ده مش هيقدر يفتح البرنامج.'))return;
+    const dev=b.dataset.dev, nm=b.dataset.name||dev, isBlocked=b.dataset.blocked==='1'; if(!dev)return;
+    if(!isBlocked && !confirm('Block '+nm+'؟\nالجهاز ده مش هيقدر يفتح البرنامج.'))return;
     b.disabled=true; b.textContent='…';
-    await syncCall({action:isBlocked?'unblock':'block', ip, by:ME});
+    await syncCall({action:isBlocked?'unblock':'block', dev, name:nm, by:ME});
     loadAdminUsers();
   }));
 }
@@ -1644,10 +1644,12 @@ function showBlocked(){
   o.style.display='grid';
   try{ if(timer)clearInterval(timer); if(countdown)clearInterval(countdown); }catch(e){}
 }
-// Ask the server (by IP): my remembered name + am I blocked. Returns {name,blocked} or null.
+// Ask the server (by DEVICE id): my remembered name + am I blocked. Returns {name,blocked} or null.
+// Keyed by device, NOT IP — on one office network everyone shares one public IP, so IP can't tell people
+// apart or block just one. The IP is still sent, as info the admin can see.
 async function whoamiCheck(){
-  if(!syncBase() || !MY_IP) return null;
-  const r=await syncCall({action:'whoami', ip:MY_IP});
+  if(!syncBase()) return null;
+  const r=await syncCall({action:'whoami', dev:deviceId()});   // no ip here: the OLD (ip-keyed) script then returns no name, avoiding a wrong auto-fill before redeploy
   if(!r) return null;
   if(r.blocked){ showBlocked(); return {blocked:true}; }
   return {name:r.name||'', blocked:false};
@@ -1698,7 +1700,7 @@ function askName(force){
       ME=v; try{ localStorage.setItem(KEY_ME,ME); }catch(e){}
       err.textContent=''; gate.style.display='none';
       const mn=el('meName'); if(mn)mn.textContent=ME;
-      if(MY_IP) syncCall({action:'register', ip:MY_IP, name:ME});   // remember this name against the IP
+      syncCall({action:'register', dev:deviceId(), name:ME, ip:MY_IP});   // remember this name against the device
       pingPresence();
       resolve(ME);
     };
@@ -2094,8 +2096,8 @@ function requireAuth(){
   await getClientIP();
   const wi = await whoamiCheck();
   if(wi && wi.blocked) return;                            // blocked -> locked out, stop init here
-  // NOTE: name is NOT auto-filled from the server by IP — on one office network everyone shares one
-  // public IP, so that would hand everybody the last person's name. The name stays per-device (localStorage).
+  // remembered name comes back keyed by THIS device, so it's this person's own name (safe on a shared IP)
+  if(!ME && wi && wi.name){ ME=wi.name; try{localStorage.setItem(KEY_ME,ME);}catch(e){} const mn=el('meName'); if(mn)mn.textContent=ME; }
   if(IS_ADMIN){                                           // restored admin -> re-claim the single seat
     const claim=await syncCall({action:'adminclaim', who:deviceId(), name:ME});
     if(claim && claim.held){ IS_ADMIN=false; try{localStorage.removeItem(KEY_ADMIN);}catch(e){}
