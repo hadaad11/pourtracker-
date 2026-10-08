@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Concrete Pour Tracker</title>
 <!-- Bumped on every build; the app compares it against the live copy and self-updates (see checkForUpdate) -->
-<meta name="app-build" content="20261008-093411">
+<meta name="app-build" content="20261008-094538">
 <!-- PWA / mobile: add to home screen as an app -->
 <meta name="theme-color" content="#0d1120">
 <link rel="manifest" href="manifest.webmanifest">
@@ -406,6 +406,7 @@
     </div>
     <div class="top-actions">
       <div class="live-pill"><span id="liveDot" class="dot"></span><span id="liveTxt">Waiting for data</span></div>
+      <button class="btn ghost on" id="adminTabBtn" title="Open the admin panel" hidden>🔑 Admin</button>
       <button class="btn ghost" id="refreshBtn" title="Refresh now (re-read the sheets)">🔄 Refresh</button>
       <button class="btn ghost" id="cfgToggle" title="Settings">⚙︎</button>
     </div>
@@ -1117,8 +1118,8 @@ function renderViewTabs(){
   const box=el('viewTabs'); if(!box)return;
   const mk=(id,label,cnt)=>`<div class="vtab ${view===id?'active':''}" data-v="${id}">${label}${cnt!=null?`<span class="cnt">${cnt}</span>`:''}</div>`;
   box.innerHTML=mk('summary','Summary',null)+mk('pours','All Pours',VD.full.length)+mk('upcoming','Upcoming',VD.upcoming.length)
-    +mk('trucks','🚛 Trucks', (TRUCKS&&TRUCKS.ok)?(TRUCKS.loaded.length+TRUCKS.available.length):null)
-    +(IS_ADMIN?mk('admin','🔑 Admin',null):'');
+    +mk('trucks','🚛 Trucks', (TRUCKS&&TRUCKS.ok)?(TRUCKS.loaded.length+TRUCKS.available.length):null);
+  // the Admin entry is NOT a content tab — it lives up top next to the live pill (see #adminTabBtn)
   box.querySelectorAll('.vtab').forEach(t=>t.addEventListener('click',async()=>{
     view=t.dataset.v; await saveCfg(); renderViewTabs(); applyView();
   }));
@@ -1591,7 +1592,7 @@ function syncCall(params){
     const s=document.createElement('script'); s.src=url;
     const cleanup=()=>{ try{delete window[cb];}catch(e){window[cb]=undefined;} s.remove(); };
     const to=setTimeout(()=>{ if(done)return; done=true; cleanup(); resolve(null); },15000);
-    window[cb]=(resp)=>{ if(done)return; done=true; clearTimeout(to); cleanup(); resolve(resp&&resp.ok?resp:null); };
+    window[cb]=(resp)=>{ if(done)return; done=true; clearTimeout(to); cleanup(); resolve(resp||null); };   // keep the reply even when ok:false (e.g. admin "held"); callers check their own fields
     s.onerror=()=>{ if(done)return; done=true; clearTimeout(to); cleanup(); resolve(null); };
     document.body.appendChild(s);
   });
@@ -1723,6 +1724,7 @@ async function toggleAdmin(){
 function applyRole(){
   document.querySelectorAll('.adm').forEach(e=>{ e.style.display = IS_ADMIN ? '' : 'none'; });
   const b=el('adminBtn'); if(b){ b.textContent = IS_ADMIN?'🔓 Admin ON':'🔑 Admin'; b.classList.toggle('on',IS_ADMIN); }
+  const tb=el('adminTabBtn'); if(tb) tb.hidden = !IS_ADMIN;      // the top-bar admin button (next to the live pill)
   const mn=el('meName'); if(mn)mn.textContent=ME||'—';
 }
 async function syncClear(type){
@@ -2082,6 +2084,7 @@ function requireAuth(){
   { const cn=el('changeName'); if(cn) cn.addEventListener('click',()=>askName(true)); }
   { const ar=el('admRefresh'); if(ar) ar.addEventListener('click',loadAdminLog); }
   { const au=el('admUsersRefresh'); if(au) au.addEventListener('click',loadAdminUsers); }
+  { const tb=el('adminTabBtn'); if(tb) tb.addEventListener('click',async()=>{ view='admin'; await saveCfg(); renderViewTabs(); applyView(); }); }
 
   applyRole();
   applyView();
@@ -2090,8 +2093,9 @@ function requireAuth(){
   // Identity: get our IP, then ask the server for our remembered name / blocked status before prompting.
   await getClientIP();
   const wi = await whoamiCheck();
-  if(wi && wi.blocked) return;                            // blocked IP -> locked out, stop init here
-  if(!ME && wi && wi.name){ ME=wi.name; try{localStorage.setItem(KEY_ME,ME);}catch(e){} const mn=el('meName'); if(mn)mn.textContent=ME; }
+  if(wi && wi.blocked) return;                            // blocked -> locked out, stop init here
+  // NOTE: name is NOT auto-filled from the server by IP — on one office network everyone shares one
+  // public IP, so that would hand everybody the last person's name. The name stays per-device (localStorage).
   if(IS_ADMIN){                                           // restored admin -> re-claim the single seat
     const claim=await syncCall({action:'adminclaim', who:deviceId(), name:ME});
     if(claim && claim.held){ IS_ADMIN=false; try{localStorage.removeItem(KEY_ADMIN);}catch(e){}
